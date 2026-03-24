@@ -136,7 +136,7 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
         ...p, 
         created_by: user.id,
         unit: p.unit || 'قطعة',
-        min_quantity: p.min_quantity ?? 2   // ✅ إضافة الحد الأدنى للتنبيه
+        min_quantity: p.min_quantity ?? 2
       } as any)
       .select()
       .single();
@@ -162,8 +162,8 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
         warehouse_id: p.warehouse_id,
         description: p.description,
         image: p.image,
-        unit: p.unit,                    // ✅ إضافة الوحدة
-        min_quantity: p.min_quantity     // ✅ إضافة الحد الأدنى للتنبيه
+        unit: p.unit,
+        min_quantity: p.min_quantity
       } as any)
       .eq('id', p.id);
     if (error) showError(error.message);
