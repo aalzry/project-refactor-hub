@@ -1,6 +1,11 @@
 // ============================================================================
-// ملف: context/WarehouseContext.tsx (محدث - دعم المؤسسات)
+// ملف: context/WarehouseContext.tsx
 // ============================================================================
+// هذا الملف يحتوي على سياق التطبيق الرئيسي لإدارة المخازن،
+// ويوفر جميع الدوال اللازمة للتعامل مع المنتجات، التصنيفات، المخازن،
+// الموردين، العملاء، والحركات، مع دعم الوحدة (unit) والحد الأدنى للتنبيه (min_quantity).
+// ============================================================================
+
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { Product, Category, Warehouse, Supplier, Client, StockMovement, MovementItem, MovementType } from '@/types/warehouse';
 import { supabase } from '@/integrations/supabase/client';
@@ -62,27 +67,28 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
   const { user, displayName } = useAuth();
   const { toast } = useToast();
 
+  // ========== جلب جميع البيانات من Supabase ==========
   const fetchAll = useCallback(async () => {
     setLoading(true);
     const [catRes, whRes, supRes, clRes, prodRes, movRes, profRes] = await Promise.all([
-      supabase.from('categories' as any).select('*'),
-      supabase.from('warehouses' as any).select('*'),
-      supabase.from('suppliers' as any).select('*'),
-      supabase.from('clients' as any).select('*'),
-      supabase.from('products' as any).select('*'),
-      supabase.from('stock_movements' as any).select('*'),
-      supabase.from('profiles' as any).select('user_id, display_name'),
+      supabase.from('categories').select('*'),
+      supabase.from('warehouses').select('*'),
+      supabase.from('suppliers').select('*'),
+      supabase.from('clients').select('*'),
+      supabase.from('products').select('*'),
+      supabase.from('stock_movements').select('*'),
+      supabase.from('profiles').select('user_id, display_name'),
     ]);
-    if (catRes.data) setCategories(catRes.data as any);
-    if (whRes.data) setWarehouses(whRes.data as any);
-    if (supRes.data) setSuppliers(supRes.data as any);
-    if (clRes.data) setClients(clRes.data as any);
-    if (prodRes.data) setProducts(prodRes.data as any);
+    if (catRes.data) setCategories(catRes.data as Category[]);
+    if (whRes.data) setWarehouses(whRes.data as Warehouse[]);
+    if (supRes.data) setSuppliers(supRes.data as Supplier[]);
+    if (clRes.data) setClients(clRes.data as Client[]);
+    if (prodRes.data) setProducts(prodRes.data as Product[]);
     if (movRes.data) {
       const movementsData = (movRes.data as any[]).map((mov: any) => ({
         ...mov,
         items: mov.items ? (typeof mov.items === 'string' ? JSON.parse(mov.items) : mov.items) : undefined
-      }));
+      })) as StockMovement[];
       setMovements(movementsData);
     }
     if (profRes.data) {
@@ -97,26 +103,36 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
     if (user) fetchAll();
   }, [user, fetchAll]);
 
-  // Realtime subscriptions
+  // ========== الاشتراك المباشر (Realtime) للتحديثات الفورية ==========
   useEffect(() => {
     if (!user) return;
     const channel = supabase
       .channel('warehouse-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => { supabase.from('categories' as any).select('*').then(r => { if (r.data) setCategories(r.data as any); }); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouses' }, () => { supabase.from('warehouses' as any).select('*').then(r => { if (r.data) setWarehouses(r.data as any); }); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers' }, () => { supabase.from('suppliers' as any).select('*').then(r => { if (r.data) setSuppliers(r.data as any); }); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, () => { supabase.from('clients' as any).select('*').then(r => { if (r.data) setClients(r.data as any); }); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => { supabase.from('products' as any).select('*').then(r => { if (r.data) setProducts(r.data as any); }); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_movements' }, () => { 
-        supabase.from('stock_movements' as any).select('*').then(r => { 
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => {
+        supabase.from('categories').select('*').then(r => { if (r.data) setCategories(r.data as Category[]); });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouses' }, () => {
+        supabase.from('warehouses').select('*').then(r => { if (r.data) setWarehouses(r.data as Warehouse[]); });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'suppliers' }, () => {
+        supabase.from('suppliers').select('*').then(r => { if (r.data) setSuppliers(r.data as Supplier[]); });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, () => {
+        supabase.from('clients').select('*').then(r => { if (r.data) setClients(r.data as Client[]); });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
+        supabase.from('products').select('*').then(r => { if (r.data) setProducts(r.data as Product[]); });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_movements' }, () => {
+        supabase.from('stock_movements').select('*').then(r => {
           if (r.data) {
             const movementsData = (r.data as any[]).map((mov: any) => ({
               ...mov,
               items: mov.items ? (typeof mov.items === 'string' ? JSON.parse(mov.items) : mov.items) : undefined
-            }));
+            })) as StockMovement[];
             setMovements(movementsData);
           }
-        }); 
+        });
       })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -124,15 +140,20 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
 
   const showError = (msg: string) => toast({ title: 'خطأ', description: msg, variant: 'destructive' });
 
-  // ---- Products ----
+  // ========== دوال المنتجات ==========
   const addProduct = useCallback(async (p: Omit<Product, 'id' | 'created_at' | 'created_by'>) => {
     if (!user?.id) {
       showError('يجب تسجيل الدخول أولاً');
       return;
     }
     const { data, error } = await supabase
-      .from('products' as any)
-      .insert({ ...p, created_by: user.id } as any)
+      .from('products')
+      .insert({
+        ...p,
+        created_by: user.id,
+        unit: p.unit || 'قطعة',
+        min_quantity: p.min_quantity ?? 2
+      })
       .select()
       .single();
 
@@ -141,17 +162,25 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
     if (data) {
-      setProducts(prev => [...prev, data as any]);
+      setProducts(prev => [...prev, data as Product]);
     }
   }, [user]);
 
   const updateProduct = useCallback(async (p: Product) => {
     const { error } = await supabase
-      .from('products' as any)
+      .from('products')
       .update({
-        name: p.name, code: p.code, barcode: p.barcode, category_id: p.category_id,
-        quantity: p.quantity, warehouse_id: p.warehouse_id, description: p.description, image: p.image
-      } as any)
+        name: p.name,
+        code: p.code,
+        barcode: p.barcode,
+        category_id: p.category_id,
+        quantity: p.quantity,
+        warehouse_id: p.warehouse_id,
+        description: p.description,
+        image: p.image,
+        unit: p.unit,
+        min_quantity: p.min_quantity
+      })
       .eq('id', p.id);
     if (error) showError(error.message);
     else {
@@ -161,28 +190,28 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
 
   const deleteProduct = useCallback(async (id: string): Promise<boolean> => {
     if (movements.some(m => m.product_id === id || m.items?.some(i => i.product_id === id))) return false;
-    const { error } = await supabase.from('products' as any).delete().eq('id', id);
+    const { error } = await supabase.from('products').delete().eq('id', id);
     if (error) { showError(error.message); return false; }
     setProducts(prev => prev.filter(p => p.id !== id));
     return true;
   }, [movements]);
 
-  // ---- Categories ----
+  // ========== دوال التصنيفات ==========
   const addCategory = useCallback(async (c: Omit<Category, 'id' | 'created_at' | 'created_by'>) => {
     if (!user?.id) return;
     const { data, error } = await supabase
-      .from('categories' as any)
-      .insert({ ...c, created_by: user.id } as any)
+      .from('categories')
+      .insert({ ...c, created_by: user.id })
       .select()
       .single();
     if (error) showError(error.message);
-    else if (data) setCategories(prev => [...prev, data as any]);
+    else if (data) setCategories(prev => [...prev, data as Category]);
   }, [user]);
 
   const updateCategory = useCallback(async (c: Category) => {
     const { error } = await supabase
-      .from('categories' as any)
-      .update({ name: c.name, description: c.description } as any)
+      .from('categories')
+      .update({ name: c.name, description: c.description })
       .eq('id', c.id);
     if (error) showError(error.message);
     else setCategories(prev => prev.map(cat => cat.id === c.id ? c : cat));
@@ -190,28 +219,28 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
 
   const deleteCategory = useCallback(async (id: string): Promise<boolean> => {
     if (products.some(p => p.category_id === id)) return false;
-    const { error } = await supabase.from('categories' as any).delete().eq('id', id);
+    const { error } = await supabase.from('categories').delete().eq('id', id);
     if (error) { showError(error.message); return false; }
     setCategories(prev => prev.filter(c => c.id !== id));
     return true;
   }, [products]);
 
-  // ---- Warehouses ----
+  // ========== دوال المخازن ==========
   const addWarehouse = useCallback(async (w: Omit<Warehouse, 'id' | 'created_at' | 'created_by'>) => {
     if (!user?.id) return;
     const { data, error } = await supabase
-      .from('warehouses' as any)
-      .insert({ ...w, created_by: user.id } as any)
+      .from('warehouses')
+      .insert({ ...w, created_by: user.id })
       .select()
       .single();
     if (error) showError(error.message);
-    else if (data) setWarehouses(prev => [...prev, data as any]);
+    else if (data) setWarehouses(prev => [...prev, data as Warehouse]);
   }, [user]);
 
   const updateWarehouse = useCallback(async (w: Warehouse) => {
     const { error } = await supabase
-      .from('warehouses' as any)
-      .update({ name: w.name, type: w.type, location: w.location, manager: w.manager, notes: w.notes } as any)
+      .from('warehouses')
+      .update({ name: w.name, type: w.type, location: w.location, manager: w.manager, notes: w.notes })
       .eq('id', w.id);
     if (error) showError(error.message);
     else setWarehouses(prev => prev.map(wh => wh.id === w.id ? w : wh));
@@ -219,28 +248,28 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
 
   const deleteWarehouse = useCallback(async (id: string): Promise<boolean> => {
     if (movements.some(m => m.warehouse_id === id) || products.some(p => p.warehouse_id === id)) return false;
-    const { error } = await supabase.from('warehouses' as any).delete().eq('id', id);
+    const { error } = await supabase.from('warehouses').delete().eq('id', id);
     if (error) { showError(error.message); return false; }
     setWarehouses(prev => prev.filter(w => w.id !== id));
     return true;
   }, [movements, products]);
 
-  // ---- Suppliers ----
+  // ========== دوال الموردين ==========
   const addSupplier = useCallback(async (s: Omit<Supplier, 'id' | 'created_at' | 'created_by'>) => {
     if (!user?.id) return;
     const { data, error } = await supabase
-      .from('suppliers' as any)
-      .insert({ ...s, created_by: user.id } as any)
+      .from('suppliers')
+      .insert({ ...s, created_by: user.id })
       .select()
       .single();
     if (error) showError(error.message);
-    else if (data) setSuppliers(prev => [...prev, data as any]);
+    else if (data) setSuppliers(prev => [...prev, data as Supplier]);
   }, [user]);
 
   const updateSupplier = useCallback(async (s: Supplier) => {
     const { error } = await supabase
-      .from('suppliers' as any)
-      .update({ name: s.name, phone: s.phone, email: s.email, address: s.address, notes: s.notes } as any)
+      .from('suppliers')
+      .update({ name: s.name, phone: s.phone, email: s.email, address: s.address, notes: s.notes })
       .eq('id', s.id);
     if (error) showError(error.message);
     else setSuppliers(prev => prev.map(sup => sup.id === s.id ? s : sup));
@@ -248,28 +277,28 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
 
   const deleteSupplier = useCallback(async (id: string): Promise<boolean> => {
     if (movements.some(m => m.entity_type === 'supplier' && m.entity_id === id)) return false;
-    const { error } = await supabase.from('suppliers' as any).delete().eq('id', id);
+    const { error } = await supabase.from('suppliers').delete().eq('id', id);
     if (error) { showError(error.message); return false; }
     setSuppliers(prev => prev.filter(s => s.id !== id));
     return true;
   }, [movements]);
 
-  // ---- Clients ----
+  // ========== دوال العملاء ==========
   const addClient = useCallback(async (c: Omit<Client, 'id' | 'created_at' | 'created_by'>) => {
     if (!user?.id) return;
     const { data, error } = await supabase
-      .from('clients' as any)
-      .insert({ ...c, created_by: user.id } as any)
+      .from('clients')
+      .insert({ ...c, created_by: user.id })
       .select()
       .single();
     if (error) showError(error.message);
-    else if (data) setClients(prev => [...prev, data as any]);
+    else if (data) setClients(prev => [...prev, data as Client]);
   }, [user]);
 
   const updateClient = useCallback(async (c: Client) => {
     const { error } = await supabase
-      .from('clients' as any)
-      .update({ name: c.name, phone: c.phone, address: c.address, notes: c.notes } as any)
+      .from('clients')
+      .update({ name: c.name, phone: c.phone, address: c.address, notes: c.notes })
       .eq('id', c.id);
     if (error) showError(error.message);
     else setClients(prev => prev.map(cl => cl.id === c.id ? c : cl));
@@ -277,23 +306,22 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
 
   const deleteClient = useCallback(async (id: string): Promise<boolean> => {
     if (movements.some(m => m.entity_type === 'client' && m.entity_id === id)) return false;
-    const { error } = await supabase.from('clients' as any).delete().eq('id', id);
+    const { error } = await supabase.from('clients').delete().eq('id', id);
     if (error) { showError(error.message); return false; }
     setClients(prev => prev.filter(c => c.id !== id));
     return true;
   }, [movements]);
 
-  // ---- Movements ----
-
+  // ========== دوال الحركات ==========
   const updateProductQuantities = useCallback(async (movement: StockMovement, reverse: boolean = false) => {
-    if (movement.product_id && movement.quantity !== undefined) {
+    if (movement.product_id && movement.quantity !== undefined && movement.quantity !== null) {
       const product = products.find(p => p.id === movement.product_id);
       if (product) {
         const change = movement.type === 'in' ? movement.quantity : -movement.quantity;
         const newQty = reverse ? product.quantity - change : product.quantity + change;
         const { error } = await supabase
-          .from('products' as any)
-          .update({ quantity: newQty } as any)
+          .from('products')
+          .update({ quantity: newQty })
           .eq('id', movement.product_id);
         if (error) showError(error.message);
         else {
@@ -302,13 +330,14 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
       }
     } else if (movement.items && movement.items.length > 0) {
       for (const item of movement.items) {
+        if (item.quantity === null) continue;
         const product = products.find(p => p.id === item.product_id);
         if (product) {
           const change = movement.type === 'in' ? item.quantity : -item.quantity;
           const newQty = reverse ? product.quantity - change : product.quantity + change;
           const { error } = await supabase
-            .from('products' as any)
-            .update({ quantity: newQty } as any)
+            .from('products')
+            .update({ quantity: newQty })
             .eq('id', item.product_id);
           if (error) showError(error.message);
           else {
@@ -351,7 +380,7 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const { data, error } = await supabase
-      .from('stock_movements' as any)
+      .from('stock_movements')
       .insert(insertData)
       .select()
       .single();
@@ -372,7 +401,7 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
       setMovements(prev => [...prev, newMovement]);
       await updateProductQuantities(newMovement, false);
 
-      // === إنشاء إشعار الحركة ===
+      // إنشاء إشعار الحركة
       const warehouseName = warehouses.find(w => w.id === newMovement.warehouse_id)?.name || 'مخزن';
       const entityName = newMovement.entity_type === 'supplier'
         ? suppliers.find(s => s.id === newMovement.entity_id)?.name || 'مورد'
@@ -390,33 +419,34 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
             userName,
             entityName,
           });
-          await supabase.from('notifications' as any).insert({
+          await supabase.from('notifications').insert({
             type: newMovement.type === 'in' ? 'movement_in' : 'movement_out',
             title: notif.title,
             message: notif.message,
             data: { movement_id: newMovement.id },
             created_by: user.id,
-          } as any);
+          });
 
-          // تحقق من المخزون المنخفض
+          // تحقق من المخزون المنخفض باستخدام min_quantity
           const updatedProduct = products.find(p => p.id === newMovement.product_id);
           if (updatedProduct) {
             const newQty = newMovement.type === 'out'
               ? updatedProduct.quantity - newMovement.quantity
               : updatedProduct.quantity + newMovement.quantity;
-            if (newQty <= 10) {
+            const minQty = updatedProduct.min_quantity ?? 2;
+            if (newQty <= minQty) {
               const lowNotif = getLowStockNotification({
                 productName,
                 quantity: newQty,
                 warehouseName,
               });
-              await supabase.from('notifications' as any).insert({
+              await supabase.from('notifications').insert({
                 type: newQty <= 0 ? 'out_of_stock' : 'low_stock',
                 title: lowNotif.title,
                 message: lowNotif.message,
                 data: { product_id: newMovement.product_id },
                 created_by: user.id,
-              } as any);
+              });
             }
           }
         } else if (newMovement.items && newMovement.items.length > 0) {
@@ -427,13 +457,13 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
             entityName,
             userName
           );
-          await supabase.from('notifications' as any).insert({
+          await supabase.from('notifications').insert({
             type: newMovement.type === 'in' ? 'movement_in' : 'movement_out',
             title: notif.title,
             message: notif.message,
             data: { movement_id: newMovement.id },
             created_by: user.id,
-          } as any);
+          });
         }
       } catch (e) {
         console.error('Error creating notification:', e);
@@ -468,7 +498,7 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const { data, error } = await supabase
-      .from('stock_movements' as any)
+      .from('stock_movements')
       .update(updateData)
       .eq('id', m.id)
       .select()
@@ -500,7 +530,7 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
     await updateProductQuantities(old, true);
 
     const { error } = await supabase
-      .from('stock_movements' as any)
+      .from('stock_movements')
       .delete()
       .eq('id', id);
 
@@ -513,7 +543,7 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
     setMovements(prev => prev.filter(m => m.id !== id));
   }, [movements, updateProductQuantities]);
 
-  // ---- Helpers ----
+  // ========== الدوال المساعدة ==========
   const getCategoryName = useCallback((id: string) => categories.find(c => c.id === id)?.name || '-', [categories]);
   const getWarehouseName = useCallback((id: string) => warehouses.find(w => w.id === id)?.name || '-', [warehouses]);
   const getSupplierName = useCallback((id: string) => suppliers.find(s => s.id === id)?.name || '-', [suppliers]);
@@ -545,6 +575,7 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
 
   const refreshAll = fetchAll;
 
+  // ========== توفير السياق ==========
   return (
     <WarehouseContext.Provider value={{
       products, categories, warehouses, suppliers, clients, movements, loading,
