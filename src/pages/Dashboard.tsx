@@ -99,27 +99,27 @@ const Dashboard = () => {
         </Button>
       </div>
 
-      {/* ✅ تحذير للمخزون المنخفض (حسب min_quantity لكل منتج) */}
+      {/* ✅ تحذير للمخزون المنخفض (خلفية حمراء وخط أصغر) */}
       {criticalStock.length > 0 && (
-        <div className="bg-warning/10 border border-warning/30 rounded-xl p-4">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-warning flex-shrink-0 mt-0.5" />
+        <div className="bg-destructive/10 border border-destructive/30 rounded-xl p-3">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" />
             <div>
-              <h3 className="text-sm font-semibold text-foreground mb-1">
+              <h3 className="text-xs font-semibold text-foreground mb-0.5">
                 ⚠️ تنبيه: منتجات بكمية منخفضة ({criticalStock.length} منتج)
               </h3>
-              <p className="text-xs text-muted-foreground mb-2">
+              <p className="text-[10px] text-muted-foreground mb-1.5">
                 المنتجات التالية وصلت إلى الحد الأدنى المحدد لها أو أقل، يرجى إعادة التوريد.
               </p>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 {criticalStock.slice(0, 5).map(p => (
-                  <span key={p.id} className={`text-xs px-2 py-1 rounded-full ${getStockAlertColor(p)}`}>
+                  <span key={p.id} className={`text-[10px] px-2 py-0.5 rounded-full ${getStockAlertColor(p)}`}>
                     {p.name}: {p.quantity} {p.unit || 'قطعة'} (الحد: {getMinQuantity(p)})
                     {p.warehouse_id && ` - ${getWarehouseName(p.warehouse_id)}`}
                   </span>
                 ))}
                 {criticalStock.length > 5 && (
-                  <span className="text-xs text-muted-foreground">+{criticalStock.length - 5} منتجات أخرى</span>
+                  <span className="text-[10px] text-muted-foreground">+{criticalStock.length - 5} منتجات أخرى</span>
                 )}
               </div>
             </div>
