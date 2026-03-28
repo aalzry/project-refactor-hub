@@ -11,7 +11,7 @@ interface MovementCardProps {
   onEdit: () => void;
   onDelete: () => void;
   onPrint: () => void;
-  onDuplicate?: () => void; // ✅ إضافة دالة النسخ (اختيارية)
+  onDuplicate?: () => void; // ✅ دالة نسخ الحركة (اختيارية)
   showCheckbox: boolean;
 }
 
@@ -30,6 +30,7 @@ export const MovementCard: React.FC<MovementCardProps> = ({
 
   return (
     <div className="bg-card rounded-xl p-3 border border-border shadow-card space-y-2">
+      {/* الصف العلوي: checkbox + النوع + التاريخ + الأزرار */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           {showCheckbox && (
@@ -43,30 +44,37 @@ export const MovementCard: React.FC<MovementCardProps> = ({
           <span className="text-xs text-muted-foreground">{movement.date}</span>
         </div>
         <div className="flex gap-1">
+          {/* زر التعديل */}
           <button onClick={onEdit} className="p-1.5 rounded-md hover:bg-primary/10 text-primary">
             <Pencil className="w-3.5 h-3.5" />
           </button>
+          {/* زر الحذف (يظهر فقط للمسؤول) */}
           {showCheckbox && (
             <button onClick={onDelete} className="p-1.5 rounded-md hover:bg-destructive/10 text-destructive">
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           )}
-          {/* ✅ إضافة زر نسخ الحركة */}
+          {/* زر نسخ الحركة (يظهر فقط إذا تم تمرير الدالة) */}
           {onDuplicate && (
             <button onClick={onDuplicate} className="p-1.5 rounded-md hover:bg-accent/20 text-accent">
               <Copy className="w-3.5 h-3.5" />
             </button>
           )}
+          {/* زر الطباعة */}
           <button onClick={onPrint} className="p-1.5 rounded-md hover:bg-accent/20 text-accent">
             <FileText className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
+
+      {/* اسم المنتج أو عدد الأصناف */}
       <div className="text-sm font-medium text-foreground">
         {isSingle
           ? getProductName(movement.product_id)
           : `حركة متعددة (${movement.items?.length || 0} أصناف)`}
       </div>
+
+      {/* تفاصيل الحركة: الكمية، الوحدة، المخزن، الجهة */}
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
         {isSingle ? (
           <>
@@ -77,11 +85,13 @@ export const MovementCard: React.FC<MovementCardProps> = ({
           <span>عدد الأصناف: <strong className="text-foreground">{movement.items?.length || 0}</strong></span>
         )}
         <span>المخزن: {getWarehouseName(movement.warehouse_id)}</span>
-        <span>{movement.entity_type === 'supplier' ? 'المورد' : 'جهة الصرف'}: {
-          movement.entity_type === 'supplier'
-            ? getSupplierName(movement.entity_id)
-            : getClientName(movement.entity_id)
-        }</span>
+        <span>
+          {movement.entity_type === 'supplier' ? 'المورد' : 'جهة الصرف'}: {
+            movement.entity_type === 'supplier'
+              ? getSupplierName(movement.entity_id)
+              : getClientName(movement.entity_id)
+          }
+        </span>
       </div>
     </div>
   );
