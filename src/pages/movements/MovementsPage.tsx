@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useWarehouse } from '@/contexts/WarehouseContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Plus, Search, Pencil, Trash2, FileText, RefreshCw, PackagePlus, X } from 'lucide-react';
@@ -35,6 +35,7 @@ const MovementsPage = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<StockMovement | null>(null);
   const [movementType, setMovementType] = useState<'single' | 'multi'>('single');
+  const [saving, setSaving] = useState(false); // ✅ حالة لمنع النقر المتكرر
 
   // نموذج الحركة الواحدة
   const [form, setForm] = useState({
@@ -69,7 +70,40 @@ const MovementsPage = () => {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [bulkDeleteDialog, setBulkDeleteDialog] = useState(false);
 
-  // دالة حساب الرصيد الحالي
+  // ✅ تحسين: تخزين خريطة وحدات المنتجات لتسريع التحقق
+  const productUnitMap = useMemo(() => {
+    const map = new Map<string, string>();
+    products.forEach(p => {
+      if (p.id && p.unit) map.set(p.id, p.unit);
+    });
+    return map;
+  }, [products]);
+
+  // ✅ تحسين: دالة حساب الرصيد لجميع المنتجات في مخزن معين (مرة واحدة)
+  const getStockMapForWarehouse = useMemo(() => {
+    return (warehouseId: string) => {
+      const stockMap = new Map<string, number>();
+      const filteredMovements = movements.filter(m => m.warehouse_id === warehouseId);
+      
+      filteredMovements.forEach(m => {
+        if (m.product_id && m.quantity !== undefined && m.quantity !== null) {
+          const change = m.type === 'in' ? m.quantity : -m.quantity;
+          stockMap.set(m.product_id, (stockMap.get(m.product_id) || 0) + change);
+        } else if (m.items) {
+          m.items.forEach(item => {
+            if (item.quantity !== null) {
+              const change = m.type === 'in' ? item.quantity : -item.quantity;
+              stockMap.set(item.product_id, (stockMap.get(item.product_id) || 0) + change);
+            }
+          });
+        }
+      });
+      
+      return stockMap;
+    };
+  }, [movements]);
+
+  // دالة حساب الرصيد الحالي لمنتج واحد (للحركة المفردة)
   const getCurrentStock = (productId: string, warehouseId: string) => {
     let total = 0;
     movements.forEach(m => {
@@ -92,21 +126,18 @@ const MovementsPage = () => {
     return product?.min_quantity ?? 2;
   };
 
-  // ✅ دالة التحقق من تطابق الوحدة مع وحدة المنتج
+  // ✅ تحسين: دالة التحقق من تطابق الوحدة (باستخدام الخريطة)
   const validateProductUnit = (productId: string, selectedUnit: string) => {
-    const product = products.find(p => p.id === productId);
-    if (!product) {
-      toast({ title: 'خطأ', description: 'المنتج غير موجود', variant: 'destructive' });
-      return false;
-    }
-    if (!product.unit) {
-      // إذا لم يكن للمنتج وحدة محددة (منتجات قديمة)، نسمح مؤقتاً
+    const productUnit = productUnitMap.get(productId);
+    if (!productUnit) {
+      // إذا لم يكن للمنتج وحدة محددة، نسمح مؤقتاً
       return true;
     }
-    if (product.unit !== selectedUnit) {
+    if (productUnit !== selectedUnit) {
+      const productName = getProductName(productId);
       toast({
         title: 'خطأ في الوحدة',
-        description: `المنتج "${product.name}" وحدته الأساسية هي "${product.unit}". لا يمكن تسجيل حركة بوحدة "${selectedUnit}".`,
+        description: `المنتج "${productName}" وحدته الأساسية هي "${productUnit}". لا يمكن تسجيل حركة بوحدة "${selectedUnit}".`,
         variant: 'destructive'
       });
       return false;
@@ -245,136 +276,155 @@ const MovementsPage = () => {
   };
 
   const handleSave = async () => {
-    if (movementType === 'single') {
-      // التحقق من الحقول الأساسية
-      if (!form.warehouse_id) {
-        toast({ title: 'خطأ', description: 'الرجاء اختيار المخزن', variant: 'destructive' });
-        return;
-      }
-      if (!form.product_id) {
-        toast({ title: 'خطأ', description: 'الرجاء اختيار المنتج', variant: 'destructive' });
-        return;
-      }
-      if (!form.unit) {
-        toast({ title: 'خطأ', description: 'الرجاء اختيار الوحدة', variant: 'destructive' });
-        return;
-      }
-      if (!form.entity_id) {
-        const entityName = form.type === 'in' ? 'المورد' : 'جهة الصرف';
-        toast({ title: 'خطأ', description: `الرجاء اختيار ${entityName}`, variant: 'destructive' });
-        return;
-      }
-      if (form.quantity === null || form.quantity <= 0) {
-        toast({ title: 'خطأ', description: 'الكمية يجب أن تكون أكبر من صفر', variant: 'destructive' });
-        return;
-      }
-
-      // ✅ التحقق من تطابق الوحدة مع المنتج
-      if (!validateProductUnit(form.product_id, form.unit)) return;
-
-      // التحقق من الرصيد
-      const currentStock = getCurrentStock(form.product_id, form.warehouse_id);
-      if (form.type === 'out') {
-        if (currentStock < form.quantity) {
-          toast({
-            title: 'خطأ في الكمية',
-            description: `الرصيد المتوفر في مخزن (${getWarehouseName(form.warehouse_id)}) هو (${currentStock}) فقط. لا يمكن صرف كمية أكبر.`,
-            variant: 'destructive'
-          });
+    setSaving(true); // ✅ منع النقر المتكرر وإظهار مؤشر التحميل
+    
+    try {
+      if (movementType === 'single') {
+        // التحقق من الحقول الأساسية
+        if (!form.warehouse_id) {
+          toast({ title: 'خطأ', description: 'الرجاء اختيار المخزن', variant: 'destructive' });
           return;
         }
-        const minQty = getProductMinQty(form.product_id);
-        const newStock = currentStock - form.quantity;
-        if (newStock < minQty && minQty > 0) {
-          toast({
-            title: '⚠️ تحذير: مخزون أقل من الحد الأدنى',
-            description: `بعد هذه العملية، سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}). لا يمكن إتمام الصرف.`,
-            variant: 'destructive'
-          });
+        if (!form.product_id) {
+          toast({ title: 'خطأ', description: 'الرجاء اختيار المنتج', variant: 'destructive' });
           return;
         }
-      }
+        if (!form.unit) {
+          toast({ title: 'خطأ', description: 'الرجاء اختيار الوحدة', variant: 'destructive' });
+          return;
+        }
+        if (!form.entity_id) {
+          const entityName = form.type === 'in' ? 'المورد' : 'جهة الصرف';
+          toast({ title: 'خطأ', description: `الرجاء اختيار ${entityName}`, variant: 'destructive' });
+          return;
+        }
+        if (form.quantity === null || form.quantity <= 0) {
+          toast({ title: 'خطأ', description: 'الكمية يجب أن تكون أكبر من صفر', variant: 'destructive' });
+          return;
+        }
 
-      if (editing) await updateMovement({ ...editing, ...form, quantity: form.quantity });
-      else await addMovement({ ...form, quantity: form.quantity });
-      const typeMsg = form.type === 'in' ? 'تم توريد للمخزن بنجاح' : 'تم تصدير حركة بنجاح';
-      toast({ title: editing ? 'تم التعديل' : (form.type === 'in' ? '✅ توريد' : '📤 تصدير'), description: typeMsg });
-    } else {
-      // الحركة المتعددة
-      if (!multiForm.warehouse_id) {
-        toast({ title: 'خطأ', description: 'الرجاء اختيار المخزن', variant: 'destructive' });
-        return;
-      }
-      if (!multiForm.entity_id) {
-        const entityName = multiForm.type === 'in' ? 'المورد' : 'جهة الصرف';
-        toast({ title: 'خطأ', description: `الرجاء اختيار ${entityName}`, variant: 'destructive' });
-        return;
-      }
-      if (items.length === 0) {
-        toast({ title: 'خطأ', description: 'يجب إضافة صنف واحد على الأقل', variant: 'destructive' });
-        return;
-      }
+        // التحقق من تطابق الوحدة مع المنتج
+        if (!validateProductUnit(form.product_id, form.unit)) return;
 
-      // التحقق من صحة الأصناف والوحدة لكل صنف
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (!item.product_id) {
-          toast({ title: 'خطأ', description: `الصنف ${i+1}: الرجاء اختيار منتج`, variant: 'destructive' });
-          return;
-        }
-        if (!item.unit) {
-          toast({ title: 'خطأ', description: `الصنف ${i+1}: الرجاء اختيار الوحدة`, variant: 'destructive' });
-          return;
-        }
-        if (item.quantity === null || item.quantity <= 0) {
-          toast({ title: 'خطأ', description: `الصنف ${i+1}: الكمية يجب أن تكون أكبر من صفر`, variant: 'destructive' });
-          return;
-        }
-        // ✅ التحقق من تطابق الوحدة مع المنتج
-        if (!validateProductUnit(item.product_id, item.unit)) return;
-      }
-
-      // التحقق من الرصيد والحد الأدنى لكل صنف (في حالة الصرف)
-      if (multiForm.type === 'out') {
-        for (const item of items) {
-          const currentStock = getCurrentStock(item.product_id, multiForm.warehouse_id);
-          if (currentStock < (item.quantity as number)) {
+        // التحقق من الرصيد
+        const currentStock = getCurrentStock(form.product_id, form.warehouse_id);
+        if (form.type === 'out') {
+          if (currentStock < form.quantity) {
             toast({
               title: 'خطأ في الكمية',
-              description: `المنتج ${getProductName(item.product_id)}: الرصيد المتوفر في المخزن هو ${currentStock} فقط.`,
+              description: `الرصيد المتوفر في مخزن (${getWarehouseName(form.warehouse_id)}) هو (${currentStock}) فقط. لا يمكن صرف كمية أكبر.`,
               variant: 'destructive'
             });
             return;
           }
-          const minQty = getProductMinQty(item.product_id);
-          const newStock = currentStock - (item.quantity as number);
+          const minQty = getProductMinQty(form.product_id);
+          const newStock = currentStock - form.quantity;
           if (newStock < minQty && minQty > 0) {
             toast({
               title: '⚠️ تحذير: مخزون أقل من الحد الأدنى',
-              description: `المنتج ${getProductName(item.product_id)}: بعد الصرف سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}). لا يمكن إتمام الصرف.`,
+              description: `بعد هذه العملية، سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}). لا يمكن إتمام الصرف.`,
               variant: 'destructive'
             });
             return;
           }
         }
-      }
 
-      const itemsToSave = items.map(item => ({ ...item, quantity: Number(item.quantity) }));
-      const movementData: Omit<StockMovement, 'id' | 'created_at' | 'created_by'> = {
-        type: multiForm.type,
-        warehouse_id: multiForm.warehouse_id,
-        entity_type: multiForm.entity_type,
-        entity_id: multiForm.entity_id,
-        date: multiForm.date,
-        notes: multiForm.notes,
-        items: itemsToSave
-      };
-      if (editing) await updateMovement({ ...editing, ...movementData });
-      else await addMovement(movementData);
-      const typeMsg = multiForm.type === 'in' ? 'تم توريد للمخزن بنجاح' : 'تم تصدير حركة بنجاح';
-      toast({ title: editing ? 'تم التعديل' : (multiForm.type === 'in' ? '✅ توريد' : '📤 تصدير'), description: typeMsg });
+        if (editing) await updateMovement({ ...editing, ...form, quantity: form.quantity });
+        else await addMovement({ ...form, quantity: form.quantity });
+        const typeMsg = form.type === 'in' ? 'تم توريد للمخزن بنجاح' : 'تم تصدير حركة بنجاح';
+        toast({ title: editing ? 'تم التعديل' : (form.type === 'in' ? '✅ توريد' : '📤 تصدير'), description: typeMsg });
+      } else {
+        // ========== الحركة المتعددة (محسنة للسرعة) ==========
+        
+        // 1. التحقق من الحقول الأساسية
+        if (!multiForm.warehouse_id) {
+          toast({ title: 'خطأ', description: 'الرجاء اختيار المخزن', variant: 'destructive' });
+          return;
+        }
+        if (!multiForm.entity_id) {
+          const entityName = multiForm.type === 'in' ? 'المورد' : 'جهة الصرف';
+          toast({ title: 'خطأ', description: `الرجاء اختيار ${entityName}`, variant: 'destructive' });
+          return;
+        }
+        if (items.length === 0) {
+          toast({ title: 'خطأ', description: 'يجب إضافة صنف واحد على الأقل', variant: 'destructive' });
+          return;
+        }
+
+        // 2. التحقق من صحة الأصناف (بدون حساب الرصيد)
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (!item.product_id) {
+            toast({ title: 'خطأ', description: `الصنف ${i+1}: الرجاء اختيار منتج`, variant: 'destructive' });
+            return;
+          }
+          if (!item.unit) {
+            toast({ title: 'خطأ', description: `الصنف ${i+1}: الرجاء اختيار الوحدة`, variant: 'destructive' });
+            return;
+          }
+          if (item.quantity === null || item.quantity <= 0) {
+            toast({ title: 'خطأ', description: `الصنف ${i+1}: الكمية يجب أن تكون أكبر من صفر`, variant: 'destructive' });
+            return;
+          }
+          if (!validateProductUnit(item.product_id, item.unit)) return;
+        }
+
+        // 3. ✅ تحسين: حساب الرصيد لجميع المنتجات دفعة واحدة (مرة واحدة فقط)
+        const stockMap = getStockMapForWarehouse(multiForm.warehouse_id);
+
+        // 4. التحقق من الرصيد والحد الأدنى (باستخدام الخريطة المحسوبة)
+        if (multiForm.type === 'out') {
+          for (const item of items) {
+            const currentStock = stockMap.get(item.product_id) || 0;
+            if (currentStock < (item.quantity as number)) {
+              toast({
+                title: 'خطأ في الكمية',
+                description: `المنتج ${getProductName(item.product_id)}: الرصيد المتوفر في المخزن هو ${currentStock} فقط.`,
+                variant: 'destructive'
+              });
+              return;
+            }
+            const minQty = getProductMinQty(item.product_id);
+            const newStock = currentStock - (item.quantity as number);
+            if (newStock < minQty && minQty > 0) {
+              toast({
+                title: '⚠️ تحذير: مخزون أقل من الحد الأدنى',
+                description: `المنتج ${getProductName(item.product_id)}: بعد الصرف سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}).`,
+                variant: 'destructive'
+              });
+              return;
+            }
+          }
+        }
+
+        // 5. حفظ الحركة
+        const itemsToSave = items.map(item => ({ ...item, quantity: Number(item.quantity) }));
+        const movementData: Omit<StockMovement, 'id' | 'created_at' | 'created_by'> = {
+          type: multiForm.type,
+          warehouse_id: multiForm.warehouse_id,
+          entity_type: multiForm.entity_type,
+          entity_id: multiForm.entity_id,
+          date: multiForm.date,
+          notes: multiForm.notes,
+          items: itemsToSave
+        };
+        
+        if (editing) await updateMovement({ ...editing, ...movementData });
+        else await addMovement(movementData);
+        
+        const typeMsg = multiForm.type === 'in' ? 'تم توريد للمخزن بنجاح' : 'تم تصدير حركة بنجاح';
+        toast({ 
+          title: editing ? 'تم التعديل' : (multiForm.type === 'in' ? '✅ توريد' : '📤 تصدير'), 
+          description: `${typeMsg} - ${items.length} منتج` 
+        });
+      }
+      setDialogOpen(false);
+    } catch (error) {
+      console.error('Error saving movement:', error);
+      toast({ title: 'خطأ', description: 'حدث خطأ أثناء حفظ الحركة', variant: 'destructive' });
+    } finally {
+      setSaving(false); // ✅ إعادة تفعيل الزر
     }
-    setDialogOpen(false);
   };
 
   const confirmDelete = (m: StockMovement) => {
@@ -449,7 +499,7 @@ const MovementsPage = () => {
     }
   };
 
-  // ---------- JSX (نفس الكود الأصلي، مع إضافة التحقق من الوحدة في القوائم) ----------
+  // ---------- JSX ----------
   return (
     <div className="space-y-3 sm:space-y-4">
       {/* شريط البحث والفلاتر */}
@@ -551,12 +601,12 @@ const MovementsPage = () => {
                 <th className="text-right p-3 font-semibold text-foreground hidden md:table-cell">بواسطة</th>
                 <th className="text-right p-3 font-semibold text-foreground hidden lg:table-cell">التاريخ</th>
                 <th className="text-center p-3 font-semibold text-foreground">إجراءات</th>
-                </tr>
+                 </tr>
             </thead>
             <tbody>
               {activeMovements.map((m, i) => (
                 <tr key={m.id} className={`border-b border-border last:border-0 hover:bg-secondary/30 transition-colors ${selectedItems.has(m.id) ? 'bg-primary/5' : ''}`}>
-                  {isAdmin && <td className="p-3"><Checkbox checked={selectedItems.has(m.id)} onCheckedChange={() => toggleOne(m.id)} /></td>}
+                  {isAdmin && <td className="p-3"><Checkbox checked={selectedItems.has(m.id)} onCheckedChange={() => toggleOne(m.id)} />}</td>}
                   <td className="p-3 text-foreground font-medium">{i + 1}</td>
                   <td className="p-3">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
@@ -782,7 +832,7 @@ const MovementsPage = () => {
                           <th className="p-1 text-right">الوحدة <span className="text-destructive">*</span></th>
                           <th className="p-1 text-right">ملاحظات</th>
                           <th className="p-1"></th>
-                        </tr>
+                         </tr>
                       </thead>
                       <tbody>
                         {items.map((item, index) => (
@@ -796,7 +846,7 @@ const MovementsPage = () => {
                                 <option value="" disabled>اختر المنتج</option>
                                 {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                               </select>
-                            </td>
+                             </td>
                             <td className="p-1">
                               <Input
                                 type="number"
@@ -807,7 +857,7 @@ const MovementsPage = () => {
                                 min="0"
                                 className="w-20"
                               />
-                            </td>
+                             </td>
                             <td className="p-1">
                               <select
                                 value={item.unit}
@@ -817,7 +867,7 @@ const MovementsPage = () => {
                                 <option value="" disabled>اختر الوحدة</option>
                                 {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                               </select>
-                            </td>
+                             </td>
                             <td className="p-1">
                               <Input
                                 value={item.notes || ''}
@@ -825,12 +875,12 @@ const MovementsPage = () => {
                                 placeholder="ملاحظة"
                                 className="w-32"
                               />
-                            </td>
+                             </td>
                             <td className="p-1">
                               <button onClick={() => removeItem(index)} className="text-destructive">
                                 <Trash2 className="w-4 h-4" />
                               </button>
-                            </td>
+                             </td>
                           </tr>
                         ))}
                       </tbody>
@@ -854,8 +904,8 @@ const MovementsPage = () => {
               />
             </div>
 
-            <Button onClick={handleSave} className="gradient-primary border-0 text-sm">
-              {editing ? 'تحديث الحركة' : 'تسجيل الحركة'}
+            <Button onClick={handleSave} disabled={saving} className="gradient-primary border-0 text-sm">
+              {saving ? 'جاري الحفظ...' : (editing ? 'تحديث الحركة' : 'تسجيل الحركة')}
             </Button>
           </div>
         </DialogContent>
