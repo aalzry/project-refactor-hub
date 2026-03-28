@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react';
 import { useWarehouse } from '@/contexts/WarehouseContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { Plus, Search, RefreshCw, PackagePlus, Checkbox, Copy, Pencil, Trash2, FileText } from 'lucide-react';
+import { Plus, Search, RefreshCw, PackagePlus, Copy, Pencil, Trash2, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { StockMovement, MovementItem } from '@/types/warehouse';
 import { UNITS } from './utils/movementUtils';
