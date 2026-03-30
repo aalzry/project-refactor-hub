@@ -1,8 +1,5 @@
 // ============================================================================
-// ملف: types/warehouse.ts (أنواع المخازن الأساسية)
-// ============================================================================
-// يحتوي على تعريفات الأنواع الأساسية لنظام إدارة المخازن:
-// المنتجات، التصنيفات، المخازن، الموردين، العملاء، الحركات
+// ملف: types/warehouse.ts (محدث - دعم الوحدات المتكامل)
 // ============================================================================
 
 export interface Product {
@@ -11,12 +8,14 @@ export interface Product {
   code: string;
   barcode: string;
   category_id: string | null;
-  quantity: number;
-  min_quantity?: number;      // الحد الأدنى للتنبيه (عند وصول المخزون لهذه القيمة أو أقل يظهر تحذير)
+  quantity: number;               // المخزون بالوحدة الأساسية
+  min_quantity?: number;
   warehouse_id: string | null;
   description: string;
-  unit?: string;              // الوحدة الأساسية للمنتج (قطعة، كرتون، علبة، ...)
-  pack_size?: number;         // عدد القطع في الكرتون/العبوة (مثال: 1 كرتون = 12 قطعة)
+  unit?: string;                  // الوحدة المعروضة (للخلفية)
+  base_unit_id?: string;          // معرف الوحدة الأساسية
+  display_unit_id?: string;       // معرف الوحدة المعروضة
+  pack_size?: number;             // معامل التحويل (1 display_unit = pack_size base_unit)
   image?: string;
   created_by: string | null;
   created_at: string;
@@ -33,7 +32,7 @@ export interface Category {
 export interface Warehouse {
   id: string;
   name: string;
-  type: string;               // نوع المخزن (مستودع، مخزن تسليح، ...)
+  type: string;
   location: string;
   manager: string;
   notes?: string;
@@ -64,31 +63,134 @@ export interface Client {
 
 export type MovementType = 'in' | 'out';
 
-// عنصر داخل الحركة المتعددة (قد تحتوي الحركة على عدة منتجات)
 export interface MovementItem {
   product_id: string;
-  quantity: number | null;   // يمكن أن يكون null في النموذج (عند عدم إدخال)
-  unit: string;               // الوحدة المستخدمة في هذه الحركة (يجب أن تتطابق مع وحدة المنتج)
+  quantity: number | null;
+  unit: string;
   notes?: string;
 }
 
 export interface StockMovement {
   id: string;
-  // حقول مشتركة
   warehouse_id: string;
   type: MovementType;
-  entity_id: string;          // معرف المورد أو العميل
+  entity_id: string;
   entity_type: 'supplier' | 'client';
   date: string;
   notes?: string;
   created_by: string | null;
   created_at: string;
-
-  // حقول الحركة المفردة (اختيارية)
   product_id?: string;
   quantity?: number | null;
-  unit?: string;              // الوحدة المستخدمة (يجب أن تتطابق مع وحدة المنتج)
-
-  // حقول الحركة المتعددة (اختيارية)
+  unit?: string;
   items?: MovementItem[];
+}
+
+// ============================================================================
+// أنواع جديدة للوحدات ومعاملات التحويل
+// ============================================================================
+
+export interface Unit {
+  id: string;
+  name: string;           // اسم الوحدة (قطعة، علبة، كرتون)
+  name_plural?: string;   // صيغة الجمع (قطع، علب، كراتين)
+  abbreviation?: string;  // الاختصار (pc, box, ctn)
+  is_base_unit: boolean;  // هل هي وحدة أساسية؟
+  category?: string;      // فئة الوحدة (وزن، حجم، عدد)
+  created_at: string;
+}
+
+export interface UnitConversion {
+  id: string;
+  from_unit_id: string;
+  to_unit_id: string;
+  factor: number;         // 1 from_unit = factor to_unit
+  created_at: string;
+}
+
+// الأنواع الخاصة بمخازن التسليح
+export type WeaponType = 'بندقية' | 'مسدس' | 'رشاش' | 'قاذفة' | 'أخرى';
+export type Caliber = '5.56' | '7.62' | '9mm' | '12.7' | '45' | 'أخرى';
+export type EquipmentType = 'منظار' | 'جهاز' | 'حقيبة' | 'أخرى';
+export type MovementTypeArmory = 'وارد' | 'صادر' | 'تحويل' | 'إرجاع';
+
+export interface ArmoryWarehouse {
+  id: string;
+  name: string;
+  type: string;
+  location: string;
+  manager: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface Weapon {
+  id: string;
+  name: string;
+  type: WeaponType;
+  caliber: Caliber;
+  serial_number: string;
+  warehouse_id: string;
+  status: 'متاح' | 'مسلّم' | 'صيانة';
+  notes?: string;
+  created_at: string;
+}
+
+export interface Ammunition {
+  id: string;
+  name: string;
+  type: string;
+  caliber: Caliber;
+  quantity: number;
+  min_quantity: number;
+  warehouse_id: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface Equipment {
+  id: string;
+  name: string;
+  type: EquipmentType;
+  serial_number?: string;
+  warehouse_id: string;
+  status: 'متاح' | 'مسلّم' | 'صيانة';
+  notes?: string;
+  created_at: string;
+}
+
+export interface PersonalEquipment {
+  id: string;
+  recipient_id: string;
+  weapon_id?: string;
+  equipment_id?: string;
+  description: string;
+  date_assigned: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface ArmoryRecipient {
+  id: string;
+  name: string;
+  military_number: string;
+  unit: string;
+  rank?: string;
+  phone?: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface ArmoryMovement {
+  id: string;
+  type: MovementTypeArmory;
+  item_type: 'weapon' | 'ammunition' | 'equipment';
+  item_id: string;
+  quantity: number;
+  from_warehouse_id?: string;
+  to_warehouse_id?: string;
+  recipient_id?: string;
+  notes?: string;
+  created_by: string;
+  created_at: string;
 }
