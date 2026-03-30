@@ -25,7 +25,8 @@ const ProductsPage = () => {
     category_id: '', 
     description: '',
     min_quantity: 2,
-    unit: 'قطعة'
+    unit: 'قطعة',
+    pack_size: 1        // ✅ حجم العبوة (عدد القطع في الكرتون)
   });
   const [deleteDialog, setDeleteDialog] = useState(false);
   const [deletingProduct, setDeletingProduct] = useState<Product | null>(null);
@@ -83,7 +84,7 @@ const ProductsPage = () => {
     return getProductTotalQty(productId);
   };
 
-  // ✅ دالة التحقق من عدم تكرار اسم المنتج
+  // دالة التحقق من عدم تكرار اسم المنتج
   const checkDuplicateProductName = (name: string, excludeId?: string) => {
     const existingProduct = products.find(p => 
       p.name.trim().toLowerCase() === name.trim().toLowerCase() && 
@@ -151,7 +152,8 @@ const ProductsPage = () => {
       category_id: categories[0]?.id || '',
       description: '',
       min_quantity: 2,
-      unit: 'قطعة'
+      unit: 'قطعة',
+      pack_size: 1
     });
     setDialogOpen(true);
   };
@@ -165,7 +167,8 @@ const ProductsPage = () => {
       category_id: p.category_id || '',
       description: p.description,
       min_quantity: p.min_quantity ?? 2,
-      unit: p.unit || 'قطعة'
+      unit: p.unit || 'قطعة',
+      pack_size: p.pack_size ?? 1
     });
     setDialogOpen(true);
   };
@@ -180,7 +183,7 @@ const ProductsPage = () => {
       return;
     }
     
-    // ✅ التحقق من عدم تكرار الاسم
+    // التحقق من عدم تكرار الاسم
     if (editing) {
       if (checkDuplicateProductName(form.name, editing.id)) return;
     } else {
@@ -196,7 +199,8 @@ const ProductsPage = () => {
         category_id: form.category_id || null,
         description: form.description,
         min_quantity: form.min_quantity,
-        unit: form.unit
+        unit: form.unit,
+        pack_size: form.pack_size
       });
       await refreshAll();
       toast({ title: 'تم التعديل', description: 'تم تعديل المنتج بنجاح' });
@@ -210,7 +214,8 @@ const ProductsPage = () => {
         warehouse_id: null,
         description: form.description,
         min_quantity: form.min_quantity,
-        unit: form.unit
+        unit: form.unit,
+        pack_size: form.pack_size
       });
       await refreshAll();
       toast({ title: 'تم الإضافة', description: 'تم إضافة المنتج بنجاح' });
@@ -330,7 +335,7 @@ const ProductsPage = () => {
                 <th className="text-right p-3 font-semibold text-foreground">حد التنبيه</th>
                 {!selectedWarehouse && <th className="text-right p-3 font-semibold text-foreground hidden lg:table-cell">المخازن</th>}
                 <th className="text-center p-3 font-semibold text-foreground">إجراءات</th>
-                </tr>
+              </tr>
             </thead>
             <tbody>
               {filtered.map(p => {
@@ -362,7 +367,7 @@ const ProductsPage = () => {
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={isAdmin ? 9 : 8} className="p-8 text-center text-muted-foreground">لا توجد منتجات</td></tr>
+                <tr><td colSpan={isAdmin ? 9 : 8} className="p-8 text-center text-muted-foreground">لا توجد منتجات</td></table>
               )}
             </tbody>
           </table>
@@ -415,6 +420,21 @@ const ProductsPage = () => {
                 <option value="زجاجة">زجاجة</option>
                 <option value="عبوة">عبوة</option>
               </select>
+            </div>
+            {/* ✅ حقل حجم العبوة */}
+            <div className="space-y-1.5">
+              <Label className="text-xs sm:text-sm">حجم العبوة (قطعة/كرتون)</Label>
+              <Input
+                type="number"
+                placeholder="مثال: 12"
+                value={form.pack_size}
+                onChange={e => setForm({ ...form, pack_size: parseInt(e.target.value, 10) || 1 })}
+                min="1"
+                className="text-sm"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                يحدد عدد القطع داخل الكرتون الواحد (مثال: 1 كرتون = 12 قطعة)
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs sm:text-sm">الحد الأدنى للتنبيه</Label>
