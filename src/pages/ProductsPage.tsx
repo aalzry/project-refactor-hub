@@ -366,9 +366,13 @@ const ProductsPage = () => {
                   </tr>
                 );
               })}
-              {filtered.length === 0 && (
-                <tr><td colSpan={isAdmin ? 9 : 8} className="p-8 text-center text-muted-foreground">لا توجد منتجات</td></table>
-              )}
+           {filtered.length === 0 && (
+  <tr>
+    <td colSpan={isAdmin ? 9 : 8} className="p-8 text-center text-muted-foreground">
+      لا توجد منتجات
+    </td>
+  </tr>
+)}
             </tbody>
           </table>
         </div>
