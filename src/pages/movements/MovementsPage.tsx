@@ -23,8 +23,8 @@ const MovementsPage = () => {
     addMovement, updateMovement, deleteMovement,
     getProductName, getWarehouseName, getSupplierName, getClientName, getUserName,
     refreshAll,
-    units,                       // قائمة الوحدات من قاعدة البيانات
-    getUnitName,                 // دالة لتحويل id الوحدة إلى اسمها
+    units,
+    getUnitName,
   } = useWarehouse();
   const { isAdmin } = useAuth();
   const { toast } = useToast();
@@ -39,17 +39,14 @@ const MovementsPage = () => {
   const [movementType, setMovementType] = useState<'single' | 'multi'>('single');
   const [saving, setSaving] = useState(false);
 
-  // حالات لصندوق نسخ الحركة
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const [duplicateMovement, setDuplicateMovement] = useState<StockMovement | null>(null);
   const [duplicateDate, setDuplicateDate] = useState('');
 
-  // حالات حوار التعديل الشامل
   const [editFullDialogOpen, setEditFullDialogOpen] = useState(false);
   const [editFullMovement, setEditFullMovement] = useState<StockMovement | null>(null);
   const [editFullType, setEditFullType] = useState<'single' | 'multi'>('single');
 
-  // نموذج التعديل للحركة المفردة (مع unit_id بدلاً من unit)
   const [editSingleForm, setEditSingleForm] = useState({
     product_id: '',
     warehouse_id: '',
@@ -59,10 +56,9 @@ const MovementsPage = () => {
     entity_type: 'supplier' as 'supplier' | 'client',
     date: '',
     notes: '',
-    unit_id: ''          // الوحدة المختارة (يمكن أن تكون base أو display)
+    unit_id: ''
   });
 
-  // نموذج التعديل للحركة المتعددة
   const [editMultiForm, setEditMultiForm] = useState({
     warehouse_id: '',
     type: 'in' as MovementType,
@@ -73,7 +69,6 @@ const MovementsPage = () => {
   });
   const [editItems, setEditItems] = useState<MovementItem[]>([]);
 
-  // نموذج الحركة الواحدة (مع unit_id)
   const [form, setForm] = useState({
     product_id: '',
     warehouse_id: '',
@@ -83,10 +78,9 @@ const MovementsPage = () => {
     entity_type: 'supplier' as 'supplier' | 'client',
     date: new Date().toISOString().split('T')[0],
     notes: '',
-    unit_id: ''          // الوحدة المختارة
+    unit_id: ''
   });
 
-  // نموذج الحركة المتعددة
   const [multiForm, setMultiForm] = useState({
     warehouse_id: '',
     type: 'in' as MovementType,
@@ -96,7 +90,6 @@ const MovementsPage = () => {
     notes: ''
   });
 
-  // الأصناف (مع unit_id)
   const [items, setItems] = useState<MovementItem[]>([
     { product_id: '', quantity: null, unit_id: '', notes: '' }
   ]);
@@ -106,7 +99,6 @@ const MovementsPage = () => {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [bulkDeleteDialog, setBulkDeleteDialog] = useState(false);
 
-  // ========== خريطة معلومات المنتج (base_unit_id, display_unit_id, pack_size) ==========
   const productInfoMap = useMemo(() => {
     const map = new Map<string, { base_unit_id: string; display_unit_id: string; pack_size: number }>();
     products.forEach(p => {
@@ -121,22 +113,18 @@ const MovementsPage = () => {
     return map;
   }, [products]);
 
-  // ========== دالة الحصول على الوحدات المتاحة للمنتج ==========
   const getAvailableUnitsForProduct = (productId: string) => {
     const info = productInfoMap.get(productId);
     if (!info) return [];
 
     const unitsList: { id: string; name: string }[] = [];
-    // الوحدة الأساسية
     unitsList.push({ id: info.base_unit_id, name: getUnitName(info.base_unit_id) });
-    // الوحدة المعروضة إذا كانت موجودة ومختلفة وكان pack_size > 1
     if (info.display_unit_id && info.display_unit_id !== info.base_unit_id && info.pack_size > 1) {
       unitsList.push({ id: info.display_unit_id, name: getUnitName(info.display_unit_id) });
     }
     return unitsList;
   };
 
-  // ========== دالة التحقق من صحة الوحدة ==========
   const validateProductUnitById = (productId: string, selectedUnitId: string) => {
     const info = productInfoMap.get(productId);
     if (!info) {
@@ -144,13 +132,9 @@ const MovementsPage = () => {
       return false;
     }
 
-    // 1. الوحدة الأساسية مسموحة دائماً
     if (selectedUnitId === info.base_unit_id) return true;
-
-    // 2. الوحدة المعروضة مسموحة إذا كان pack_size > 1
     if (selectedUnitId === info.display_unit_id && info.pack_size > 1) return true;
 
-    // غير ذلك ممنوع
     toast({
       title: 'خطأ في الوحدة',
       description: `المنتج "${getProductName(productId)}" لا يدعم الوحدة "${getUnitName(selectedUnitId)}". الوحدات المتاحة: ${getUnitName(info.base_unit_id)}${info.display_unit_id && info.pack_size > 1 ? ` و ${getUnitName(info.display_unit_id)}` : ''}.`,
@@ -159,20 +143,16 @@ const MovementsPage = () => {
     return false;
   };
 
-  // ========== دالة تحويل الكمية إلى الوحدة الأساسية ==========
   const convertToBaseUnit = (productId: string, quantity: number, selectedUnitId: string): number => {
     const info = productInfoMap.get(productId);
     if (!info) return quantity;
 
-    // إذا كانت الوحدة المختارة هي الوحدة المعروضة وكان pack_size > 1
     if (selectedUnitId === info.display_unit_id && info.pack_size > 1) {
       return quantity * info.pack_size;
     }
-    // الوحدة الأساسية أو أي حالة أخرى
     return quantity;
   };
 
-  // ========== دوال حساب الرصيد (نفس السابق، لكن بدون تعديل لأن الكمية مخزنة بالوحدة الأساسية) ==========
   const getStockMapForWarehouse = useMemo(() => {
     return (warehouseId: string) => {
       const stockMap = new Map<string, number>();
@@ -221,7 +201,6 @@ const MovementsPage = () => {
     if (e.key === '.' || e.key === 'e' || e.key === '-' || e.key === '+') e.preventDefault();
   };
 
-  // تصفية وترتيب الحركات
   const filtered = movements
     .filter(m => filter === 'all' || m.type === filter)
     .filter(m => {
@@ -264,14 +243,12 @@ const MovementsPage = () => {
     setBulkDeleteDialog(false);
   };
 
-  // دالة فتح حوار نسخ الحركة
   const openDuplicateDialog = (movement: StockMovement) => {
     setDuplicateMovement(movement);
     setDuplicateDate(new Date().toISOString().split('T')[0]);
     setDuplicateDialogOpen(true);
   };
 
-  // دالة نسخ الحركة (مع دعم الوحدات)
   const handleDuplicate = async () => {
     if (!duplicateMovement) return;
     
@@ -287,7 +264,6 @@ const MovementsPage = () => {
       };
       
       if (duplicateMovement.product_id && duplicateMovement.quantity !== undefined) {
-        // حركة مفردة
         const productId = duplicateMovement.product_id;
         const unitId = duplicateMovement.display_unit_id ?? duplicateMovement.unit_id;
         if (!unitId) throw new Error('الوحدة غير محددة');
@@ -299,7 +275,6 @@ const MovementsPage = () => {
         newMovement.display_quantity = duplicateMovement.quantity;
         newMovement.display_unit_id = unitId;
       } else if (duplicateMovement.items && duplicateMovement.items.length > 0) {
-        // حركة متعددة
         const itemsToSave = duplicateMovement.items.map(item => {
           const productId = item.product_id;
           const unitId = item.display_unit_id ?? item.unit_id;
@@ -332,7 +307,6 @@ const MovementsPage = () => {
     }
   };
 
-  // دالة فتح حوار التعديل الشامل (مع دعم الوحدات)
   const openEditFull = (movement: StockMovement) => {
     setEditFullMovement(movement);
     if (movement.product_id) {
@@ -367,7 +341,6 @@ const MovementsPage = () => {
     setEditFullDialogOpen(true);
   };
 
-  // دوال مساعدة لتعديل الأصناف في الحركة المتعددة (مع unit_id)
   const addEditItem = () => setEditItems([...editItems, { product_id: '', quantity: null, unit_id: '', notes: '' }]);
   const removeEditItem = (index: number) => setEditItems(editItems.filter((_, i) => i !== index));
   const updateEditItem = (index: number, field: keyof MovementItem, value: any) => {
@@ -381,7 +354,6 @@ const MovementsPage = () => {
     setEditItems(newItems);
   };
 
-  // دالة حفظ التعديلات الشاملة (مع دعم الوحدات)
   const handleEditSave = async () => {
     if (!editFullMovement) return;
     
@@ -574,7 +546,6 @@ const MovementsPage = () => {
     setItems(newItems);
   };
 
-  // دالة حفظ الحركة الجديدة (مع دعم الوحدات)
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -624,7 +595,6 @@ const MovementsPage = () => {
               description: `بعد هذه العملية، سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}).`,
               variant: 'destructive'
             });
-            // لا نمنع العملية، فقط نحذر
           }
         }
 
@@ -672,7 +642,6 @@ const MovementsPage = () => {
           if (!validateProductUnitById(item.product_id, item.unit_id)) return;
         }
 
-        // تحويل الكميات
         const itemsToSave = items.map(item => {
           const baseQuantity = convertToBaseUnit(item.product_id, item.quantity, item.unit_id);
           const productInfo = productInfoMap.get(item.product_id);
@@ -685,7 +654,6 @@ const MovementsPage = () => {
           };
         });
 
-        // التحقق من الرصيد للصادرات
         if (multiForm.type === 'out') {
           const stockMap = getStockMapForWarehouse(multiForm.warehouse_id);
           for (const item of itemsToSave) {
@@ -751,7 +719,6 @@ const MovementsPage = () => {
     setDeletingMovement(null);
   };
 
-  // دالة الطباعة (تمرير getUnitName إلى دوال HTML)
   const printMovementNative = async (html: string, title: string) => {
     const platform = Capacitor.getPlatform();
     const tempDiv = document.createElement('div');
