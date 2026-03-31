@@ -66,10 +66,11 @@ export type MovementType = 'in' | 'out';
 export interface MovementItem {
   product_id: string;
   quantity: number | null;
-  unit: string;
+  unit: string;                     // اسم الوحدة (للخلفية)
   notes?: string;
-  display_quantity?: number | null;   // الكمية الأصلية المدخلة من المستخدم
-  display_unit?: string | null;       // الوحدة الأصلية المدخلة من المستخدم
+  unit_id?: string;                 // معرف الوحدة الأساسية (للمخزون)
+  display_quantity?: number | null; // الكمية الأصلية المدخلة من المستخدم
+  display_unit_id?: string | null;  // معرف الوحدة الأصلية المدخلة من المستخدم
 }
 
 export interface StockMovement {
@@ -84,10 +85,11 @@ export interface StockMovement {
   created_at: string;
   product_id?: string;
   quantity?: number | null;
-  unit?: string;
+  unit?: string;                    // اسم الوحدة (للخلفية)
   items?: MovementItem[];
-  display_quantity?: number | null;   // الكمية الأصلية المدخلة من المستخدم (لحركة مفردة)
-  display_unit?: string | null;       // الوحدة الأصلية المدخلة من المستخدم (لحركة مفردة)
+  unit_id?: string;                 // معرف الوحدة الأساسية (للمخزون)
+  display_quantity?: number | null; // الكمية الأصلية المدخلة من المستخدم (لحركة مفردة)
+  display_unit_id?: string | null;  // معرف الوحدة الأصلية المدخلة من المستخدم (لحركة مفردة)
 }
 
 // ============================================================================
