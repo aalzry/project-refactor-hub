@@ -1,10 +1,12 @@
+// src/utils/notificationTemplates.ts
+
 // قوالب نصوص الإشعارات
 export type NotificationType = 'movement_in' | 'movement_out' | 'low_stock' | 'out_of_stock';
 
 interface MovementNotificationData {
   productName: string;
-  quantity: number;
-  unit: string;
+  quantity: number;      // يجب أن تكون الكمية المعروضة (display_quantity)
+  unit: string;          // يجب أن تكون الوحدة المعروضة (display_unit)
   warehouseName: string;
   userName: string;
   entityName: string;
@@ -12,7 +14,7 @@ interface MovementNotificationData {
 
 interface LowStockNotificationData {
   productName: string;
-  quantity: number;
+  quantity: number;      // الكمية بالوحدة الأساسية (لأن التحذير يعتمد على الكمية الفعلية)
   warehouseName: string;
 }
 
@@ -23,12 +25,12 @@ export function getMovementNotification(
   if (type === 'in') {
     return {
       title: '📥 حركة وارد جديدة',
-      message: `تم إضافة ${data.quantity} ${data.unit} ${data.productName} إلى ${data.warehouseName} من ${data.entityName} بواسطة ${data.userName}.`,
+      message: `تم إضافة ${data.quantity} ${data.unit} من ${data.productName} إلى ${data.warehouseName} من ${data.entityName} بواسطة ${data.userName}.`,
     };
   }
   return {
     title: '📤 حركة صادر جديدة',
-    message: `تم تصدير ${data.quantity} ${data.unit} ${data.productName} من ${data.warehouseName} إلى ${data.entityName} بواسطة ${data.userName}.`,
+    message: `تم تصدير ${data.quantity} ${data.unit} من ${data.productName} من ${data.warehouseName} إلى ${data.entityName} بواسطة ${data.userName}.`,
   };
 }
 
