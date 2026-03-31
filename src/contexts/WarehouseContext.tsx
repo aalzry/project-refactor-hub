@@ -196,7 +196,8 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
     if (movRes.data) {
       const movementsData = (movRes.data as any[]).map((mov: any) => ({
         ...mov,
-        items: mov.items ? (typeof mov.items === 'string' ? JSON.parse(mov.items) : mov.items) : undefined
+        items: mov.items ? (typeof mov.items === 'string' ? JSON.parse(mov.items) : mov.items) : undefined,
+        display_unit_id: mov.display_unit,   // تحويل display_unit إلى display_unit_id
       })) as StockMovement[];
       setMovements(movementsData);
     }
@@ -239,7 +240,8 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
           if (r.data) {
             const movementsData = (r.data as any[]).map((mov: any) => ({
               ...mov,
-              items: mov.items ? (typeof mov.items === 'string' ? JSON.parse(mov.items) : mov.items) : undefined
+              items: mov.items ? (typeof mov.items === 'string' ? JSON.parse(mov.items) : mov.items) : undefined,
+              display_unit_id: mov.display_unit,
             })) as StockMovement[];
             setMovements(movementsData);
           }
@@ -497,7 +499,6 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
       insertData.unit_id = m.unit_id;
       insertData.items = null;
     } else if (m.items && m.items.length > 0) {
-      // Ensure items have the correct fields before stringifying
       const itemsToStore = m.items.map(item => ({
         product_id: item.product_id,
         quantity: item.quantity,
