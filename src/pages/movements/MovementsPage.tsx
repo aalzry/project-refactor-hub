@@ -22,7 +22,9 @@ const MovementsPage = () => {
     movements, products, warehouses, suppliers, clients,
     addMovement, updateMovement, deleteMovement,
     getProductName, getWarehouseName, getSupplierName, getClientName, getUserName,
-    refreshAll
+    refreshAll,
+    units,                       // قائمة الوحدات من قاعدة البيانات
+    getUnitName,                 // دالة لتحويل id الوحدة إلى اسمها
   } = useWarehouse();
   const { isAdmin } = useAuth();
   const { toast } = useToast();
@@ -47,7 +49,7 @@ const MovementsPage = () => {
   const [editFullMovement, setEditFullMovement] = useState<StockMovement | null>(null);
   const [editFullType, setEditFullType] = useState<'single' | 'multi'>('single');
 
-  // نموذج التعديل للحركة المفردة
+  // نموذج التعديل للحركة المفردة (مع unit_id بدلاً من unit)
   const [editSingleForm, setEditSingleForm] = useState({
     product_id: '',
     warehouse_id: '',
@@ -57,7 +59,7 @@ const MovementsPage = () => {
     entity_type: 'supplier' as 'supplier' | 'client',
     date: '',
     notes: '',
-    unit: ''
+    unit_id: ''          // الوحدة المختارة (يمكن أن تكون base أو display)
   });
 
   // نموذج التعديل للحركة المتعددة
@@ -71,7 +73,7 @@ const MovementsPage = () => {
   });
   const [editItems, setEditItems] = useState<MovementItem[]>([]);
 
-  // نموذج الحركة الواحدة
+  // نموذج الحركة الواحدة (مع unit_id)
   const [form, setForm] = useState({
     product_id: '',
     warehouse_id: '',
@@ -81,7 +83,7 @@ const MovementsPage = () => {
     entity_type: 'supplier' as 'supplier' | 'client',
     date: new Date().toISOString().split('T')[0],
     notes: '',
-    unit: ''
+    unit_id: ''          // الوحدة المختارة
   });
 
   // نموذج الحركة المتعددة
@@ -94,9 +96,9 @@ const MovementsPage = () => {
     notes: ''
   });
 
-  // الأصناف
+  // الأصناف (مع unit_id)
   const [items, setItems] = useState<MovementItem[]>([
-    { product_id: '', quantity: null, unit: '', notes: '' }
+    { product_id: '', quantity: null, unit_id: '', notes: '' }
   ]);
 
   const [deleteDialog, setDeleteDialog] = useState(false);
@@ -104,16 +106,73 @@ const MovementsPage = () => {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [bulkDeleteDialog, setBulkDeleteDialog] = useState(false);
 
-  // خريطة وحدات المنتجات (تسريع التحقق)
-  const productUnitMap = useMemo(() => {
-    const map = new Map<string, string>();
+  // ========== خريطة معلومات المنتج (base_unit_id, display_unit_id, pack_size) ==========
+  const productInfoMap = useMemo(() => {
+    const map = new Map<string, { base_unit_id: string; display_unit_id: string; pack_size: number }>();
     products.forEach(p => {
-      if (p.id && p.unit) map.set(p.id, p.unit);
+      if (p.id) {
+        map.set(p.id, {
+          base_unit_id: p.base_unit_id,
+          display_unit_id: p.display_unit_id,
+          pack_size: p.pack_size || 1,
+        });
+      }
     });
     return map;
   }, [products]);
 
-  // دالة حساب الرصيد لجميع المنتجات في مخزن معين (مرة واحدة)
+  // ========== دالة الحصول على الوحدات المتاحة للمنتج ==========
+  const getAvailableUnitsForProduct = (productId: string) => {
+    const info = productInfoMap.get(productId);
+    if (!info) return [];
+
+    const unitsList: { id: string; name: string }[] = [];
+    // الوحدة الأساسية
+    unitsList.push({ id: info.base_unit_id, name: getUnitName(info.base_unit_id) });
+    // الوحدة المعروضة إذا كانت موجودة ومختلفة وكان pack_size > 1
+    if (info.display_unit_id && info.display_unit_id !== info.base_unit_id && info.pack_size > 1) {
+      unitsList.push({ id: info.display_unit_id, name: getUnitName(info.display_unit_id) });
+    }
+    return unitsList;
+  };
+
+  // ========== دالة التحقق من صحة الوحدة ==========
+  const validateProductUnitById = (productId: string, selectedUnitId: string) => {
+    const info = productInfoMap.get(productId);
+    if (!info) {
+      toast({ title: 'خطأ', description: 'المنتج غير موجود', variant: 'destructive' });
+      return false;
+    }
+
+    // 1. الوحدة الأساسية مسموحة دائماً
+    if (selectedUnitId === info.base_unit_id) return true;
+
+    // 2. الوحدة المعروضة مسموحة إذا كان pack_size > 1
+    if (selectedUnitId === info.display_unit_id && info.pack_size > 1) return true;
+
+    // غير ذلك ممنوع
+    toast({
+      title: 'خطأ في الوحدة',
+      description: `المنتج "${getProductName(productId)}" لا يدعم الوحدة "${getUnitName(selectedUnitId)}". الوحدات المتاحة: ${getUnitName(info.base_unit_id)}${info.display_unit_id && info.pack_size > 1 ? ` و ${getUnitName(info.display_unit_id)}` : ''}.`,
+      variant: 'destructive'
+    });
+    return false;
+  };
+
+  // ========== دالة تحويل الكمية إلى الوحدة الأساسية ==========
+  const convertToBaseUnit = (productId: string, quantity: number, selectedUnitId: string): number => {
+    const info = productInfoMap.get(productId);
+    if (!info) return quantity;
+
+    // إذا كانت الوحدة المختارة هي الوحدة المعروضة وكان pack_size > 1
+    if (selectedUnitId === info.display_unit_id && info.pack_size > 1) {
+      return quantity * info.pack_size;
+    }
+    // الوحدة الأساسية أو أي حالة أخرى
+    return quantity;
+  };
+
+  // ========== دوال حساب الرصيد (نفس السابق، لكن بدون تعديل لأن الكمية مخزنة بالوحدة الأساسية) ==========
   const getStockMapForWarehouse = useMemo(() => {
     return (warehouseId: string) => {
       const stockMap = new Map<string, number>();
@@ -137,7 +196,6 @@ const MovementsPage = () => {
     };
   }, [movements]);
 
-  // دالة حساب الرصيد الحالي لمنتج واحد (للحركة المفردة)
   const getCurrentStock = (productId: string, warehouseId: string) => {
     let total = 0;
     movements.forEach(m => {
@@ -154,31 +212,11 @@ const MovementsPage = () => {
     return total;
   };
 
-  // دالة للحصول على min_quantity للمنتج
   const getProductMinQty = (productId: string) => {
     const product = products.find(p => p.id === productId);
     return product?.min_quantity ?? 2;
   };
 
-  // دالة التحقق من تطابق الوحدة (باستخدام الخريطة)
-  const validateProductUnit = (productId: string, selectedUnit: string) => {
-    const productUnit = productUnitMap.get(productId);
-    if (!productUnit) {
-      return true;
-    }
-    if (productUnit !== selectedUnit) {
-      const productName = getProductName(productId);
-      toast({
-        title: 'خطأ في الوحدة',
-        description: `المنتج "${productName}" وحدته الأساسية هي "${productUnit}". لا يمكن تسجيل حركة بوحدة "${selectedUnit}".`,
-        variant: 'destructive'
-      });
-      return false;
-    }
-    return true;
-  };
-
-  // منع الكسور العشرية
   const preventDecimal = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === '.' || e.key === 'e' || e.key === '-' || e.key === '+') e.preventDefault();
   };
@@ -233,7 +271,7 @@ const MovementsPage = () => {
     setDuplicateDialogOpen(true);
   };
 
-  // دالة نسخ الحركة
+  // دالة نسخ الحركة (مع دعم الوحدات)
   const handleDuplicate = async () => {
     if (!duplicateMovement) return;
     
@@ -249,14 +287,34 @@ const MovementsPage = () => {
       };
       
       if (duplicateMovement.product_id && duplicateMovement.quantity !== undefined) {
-        newMovement.product_id = duplicateMovement.product_id;
-        newMovement.quantity = duplicateMovement.quantity;
-        newMovement.unit = duplicateMovement.unit;
+        // حركة مفردة
+        const productId = duplicateMovement.product_id;
+        const unitId = duplicateMovement.display_unit_id ?? duplicateMovement.unit_id;
+        if (!unitId) throw new Error('الوحدة غير محددة');
+        const baseQuantity = convertToBaseUnit(productId, duplicateMovement.quantity, unitId);
+        const productInfo = productInfoMap.get(productId);
+        newMovement.product_id = productId;
+        newMovement.quantity = baseQuantity;
+        newMovement.unit_id = productInfo?.base_unit_id;
+        newMovement.display_quantity = duplicateMovement.quantity;
+        newMovement.display_unit_id = unitId;
       } else if (duplicateMovement.items && duplicateMovement.items.length > 0) {
-        newMovement.items = duplicateMovement.items.map(item => ({
-          ...item,
-          quantity: item.quantity
-        }));
+        // حركة متعددة
+        const itemsToSave = duplicateMovement.items.map(item => {
+          const productId = item.product_id;
+          const unitId = item.display_unit_id ?? item.unit_id;
+          if (!unitId) throw new Error('الوحدة غير محددة');
+          const baseQuantity = convertToBaseUnit(productId, item.quantity, unitId);
+          const productInfo = productInfoMap.get(productId);
+          return {
+            ...item,
+            quantity: baseQuantity,
+            unit_id: productInfo?.base_unit_id,
+            display_quantity: item.quantity,
+            display_unit_id: unitId,
+          };
+        });
+        newMovement.items = itemsToSave;
       } else {
         toast({ title: 'خطأ', description: 'لا يمكن نسخ هذه الحركة', variant: 'destructive' });
         return;
@@ -274,7 +332,7 @@ const MovementsPage = () => {
     }
   };
 
-  // دالة فتح حوار التعديل الشامل
+  // دالة فتح حوار التعديل الشامل (مع دعم الوحدات)
   const openEditFull = (movement: StockMovement) => {
     setEditFullMovement(movement);
     if (movement.product_id) {
@@ -283,12 +341,12 @@ const MovementsPage = () => {
         product_id: movement.product_id,
         warehouse_id: movement.warehouse_id,
         type: movement.type,
-        quantity: movement.quantity ?? null,
+        quantity: movement.display_quantity ?? movement.quantity ?? null,
         entity_id: movement.entity_id,
         entity_type: movement.entity_type,
         date: movement.date,
         notes: movement.notes || '',
-        unit: movement.unit || ''
+        unit_id: movement.display_unit_id ?? movement.unit_id ?? ''
       });
     } else if (movement.items && movement.items.length > 0) {
       setEditFullType('multi');
@@ -300,13 +358,17 @@ const MovementsPage = () => {
         date: movement.date,
         notes: movement.notes || ''
       });
-      setEditItems(movement.items.map(item => ({ ...item })));
+      setEditItems(movement.items.map(item => ({
+        ...item,
+        quantity: item.display_quantity ?? item.quantity,
+        unit_id: item.display_unit_id ?? item.unit_id,
+      })));
     }
     setEditFullDialogOpen(true);
   };
 
-  // دوال مساعدة لتعديل الأصناف في الحركة المتعددة
-  const addEditItem = () => setEditItems([...editItems, { product_id: '', quantity: null, unit: '', notes: '' }]);
+  // دوال مساعدة لتعديل الأصناف في الحركة المتعددة (مع unit_id)
+  const addEditItem = () => setEditItems([...editItems, { product_id: '', quantity: null, unit_id: '', notes: '' }]);
   const removeEditItem = (index: number) => setEditItems(editItems.filter((_, i) => i !== index));
   const updateEditItem = (index: number, field: keyof MovementItem, value: any) => {
     const newItems = [...editItems];
@@ -319,7 +381,7 @@ const MovementsPage = () => {
     setEditItems(newItems);
   };
 
-  // دالة حفظ التعديلات الشاملة
+  // دالة حفظ التعديلات الشاملة (مع دعم الوحدات)
   const handleEditSave = async () => {
     if (!editFullMovement) return;
     
@@ -334,7 +396,7 @@ const MovementsPage = () => {
           toast({ title: 'خطأ', description: 'الرجاء اختيار المنتج', variant: 'destructive' });
           return;
         }
-        if (!editSingleForm.unit) {
+        if (!editSingleForm.unit_id) {
           toast({ title: 'خطأ', description: 'الرجاء اختيار الوحدة', variant: 'destructive' });
           return;
         }
@@ -348,12 +410,18 @@ const MovementsPage = () => {
           return;
         }
         
-        if (!validateProductUnit(editSingleForm.product_id, editSingleForm.unit)) return;
+        if (!validateProductUnitById(editSingleForm.product_id, editSingleForm.unit_id)) return;
+        
+        const baseQuantity = convertToBaseUnit(editSingleForm.product_id, editSingleForm.quantity, editSingleForm.unit_id);
+        const productInfo = productInfoMap.get(editSingleForm.product_id);
         
         await updateMovement({
           ...editFullMovement,
           ...editSingleForm,
-          quantity: editSingleForm.quantity
+          quantity: baseQuantity,
+          unit_id: productInfo?.base_unit_id,
+          display_quantity: editSingleForm.quantity,
+          display_unit_id: editSingleForm.unit_id
         });
         toast({ title: 'تم التعديل', description: 'تم تعديل الحركة بنجاح' });
       } else {
@@ -377,7 +445,7 @@ const MovementsPage = () => {
             toast({ title: 'خطأ', description: `الصنف ${i+1}: الرجاء اختيار منتج`, variant: 'destructive' });
             return;
           }
-          if (!item.unit) {
+          if (!item.unit_id) {
             toast({ title: 'خطأ', description: `الصنف ${i+1}: الرجاء اختيار الوحدة`, variant: 'destructive' });
             return;
           }
@@ -385,13 +453,25 @@ const MovementsPage = () => {
             toast({ title: 'خطأ', description: `الصنف ${i+1}: الكمية يجب أن تكون أكبر من صفر`, variant: 'destructive' });
             return;
           }
-          if (!validateProductUnit(item.product_id, item.unit)) return;
+          if (!validateProductUnitById(item.product_id, item.unit_id)) return;
         }
+        
+        const itemsToSave = editItems.map(item => {
+          const baseQuantity = convertToBaseUnit(item.product_id, item.quantity, item.unit_id);
+          const productInfo = productInfoMap.get(item.product_id);
+          return {
+            ...item,
+            quantity: baseQuantity,
+            unit_id: productInfo?.base_unit_id,
+            display_quantity: item.quantity,
+            display_unit_id: item.unit_id,
+          };
+        });
         
         await updateMovement({
           ...editFullMovement,
           ...editMultiForm,
-          items: editItems.map(item => ({ ...item, quantity: Number(item.quantity) }))
+          items: itemsToSave
         });
         toast({ title: 'تم التعديل', description: 'تم تعديل الحركة بنجاح' });
       }
@@ -419,7 +499,7 @@ const MovementsPage = () => {
       entity_type: 'supplier',
       date: new Date().toISOString().split('T')[0],
       notes: '',
-      unit: ''
+      unit_id: ''
     });
     setDialogOpen(true);
   };
@@ -435,7 +515,7 @@ const MovementsPage = () => {
       date: new Date().toISOString().split('T')[0],
       notes: ''
     });
-    setItems([{ product_id: '', quantity: null, unit: '', notes: '' }]);
+    setItems([{ product_id: '', quantity: null, unit_id: '', notes: '' }]);
     setDialogOpen(true);
   };
 
@@ -447,12 +527,12 @@ const MovementsPage = () => {
         product_id: m.product_id,
         warehouse_id: m.warehouse_id,
         type: m.type,
-        quantity: m.quantity ?? null,
+        quantity: m.display_quantity ?? m.quantity ?? null,
         entity_id: m.entity_id,
         entity_type: m.entity_type,
         date: m.date,
         notes: m.notes || '',
-        unit: m.unit || ''
+        unit_id: m.display_unit_id ?? m.unit_id ?? ''
       });
     } else {
       setMovementType('multi');
@@ -464,7 +544,11 @@ const MovementsPage = () => {
         date: m.date,
         notes: m.notes || ''
       });
-      setItems(m.items || []);
+      setItems((m.items || []).map(item => ({
+        ...item,
+        quantity: item.display_quantity ?? item.quantity,
+        unit_id: item.display_unit_id ?? item.unit_id,
+      })));
     }
     setDialogOpen(true);
   };
@@ -476,7 +560,7 @@ const MovementsPage = () => {
     else setMultiForm({ ...multiForm, type, entity_type, entity_id });
   };
 
-  const addItem = () => setItems([...items, { product_id: '', quantity: null, unit: '', notes: '' }]);
+  const addItem = () => setItems([...items, { product_id: '', quantity: null, unit_id: '', notes: '' }]);
   const removeItem = (index: number) => setItems(items.filter((_, i) => i !== index));
 
   const updateItem = (index: number, field: keyof MovementItem, value: any) => {
@@ -490,6 +574,7 @@ const MovementsPage = () => {
     setItems(newItems);
   };
 
+  // دالة حفظ الحركة الجديدة (مع دعم الوحدات)
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -502,7 +587,7 @@ const MovementsPage = () => {
           toast({ title: 'خطأ', description: 'الرجاء اختيار المنتج', variant: 'destructive' });
           return;
         }
-        if (!form.unit) {
+        if (!form.unit_id) {
           toast({ title: 'خطأ', description: 'الرجاء اختيار الوحدة', variant: 'destructive' });
           return;
         }
@@ -516,11 +601,14 @@ const MovementsPage = () => {
           return;
         }
 
-        if (!validateProductUnit(form.product_id, form.unit)) return;
+        if (!validateProductUnitById(form.product_id, form.unit_id)) return;
+
+        const baseQuantity = convertToBaseUnit(form.product_id, form.quantity, form.unit_id);
+        const productInfo = productInfoMap.get(form.product_id);
 
         const currentStock = getCurrentStock(form.product_id, form.warehouse_id);
         if (form.type === 'out') {
-          if (currentStock < form.quantity) {
+          if (currentStock < baseQuantity) {
             toast({
               title: 'خطأ في الكمية',
               description: `الرصيد المتوفر في مخزن (${getWarehouseName(form.warehouse_id)}) هو (${currentStock}) فقط. لا يمكن صرف كمية أكبر.`,
@@ -529,19 +617,27 @@ const MovementsPage = () => {
             return;
           }
           const minQty = getProductMinQty(form.product_id);
-          const newStock = currentStock - form.quantity;
+          const newStock = currentStock - baseQuantity;
           if (newStock < minQty && minQty > 0) {
             toast({
               title: '⚠️ تحذير: مخزون أقل من الحد الأدنى',
-              description: `بعد هذه العملية، سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}). لا يمكن إتمام الصرف.`,
+              description: `بعد هذه العملية، سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}).`,
               variant: 'destructive'
             });
-            return;
+            // لا نمنع العملية، فقط نحذر
           }
         }
 
-        if (editing) await updateMovement({ ...editing, ...form, quantity: form.quantity });
-        else await addMovement({ ...form, quantity: form.quantity });
+        const movementData = {
+          ...form,
+          quantity: baseQuantity,
+          unit_id: productInfo?.base_unit_id,
+          display_quantity: form.quantity,
+          display_unit_id: form.unit_id
+        };
+
+        if (editing) await updateMovement({ ...editing, ...movementData });
+        else await addMovement(movementData);
         const typeMsg = form.type === 'in' ? 'تم توريد للمخزن بنجاح' : 'تم تصدير حركة بنجاح';
         toast({ title: editing ? 'تم التعديل' : (form.type === 'in' ? '✅ توريد' : '📤 تصدير'), description: typeMsg });
       } else {
@@ -565,7 +661,7 @@ const MovementsPage = () => {
             toast({ title: 'خطأ', description: `الصنف ${i+1}: الرجاء اختيار منتج`, variant: 'destructive' });
             return;
           }
-          if (!item.unit) {
+          if (!item.unit_id) {
             toast({ title: 'خطأ', description: `الصنف ${i+1}: الرجاء اختيار الوحدة`, variant: 'destructive' });
             return;
           }
@@ -573,14 +669,28 @@ const MovementsPage = () => {
             toast({ title: 'خطأ', description: `الصنف ${i+1}: الكمية يجب أن تكون أكبر من صفر`, variant: 'destructive' });
             return;
           }
-          if (!validateProductUnit(item.product_id, item.unit)) return;
+          if (!validateProductUnitById(item.product_id, item.unit_id)) return;
         }
 
+        // تحويل الكميات
+        const itemsToSave = items.map(item => {
+          const baseQuantity = convertToBaseUnit(item.product_id, item.quantity, item.unit_id);
+          const productInfo = productInfoMap.get(item.product_id);
+          return {
+            ...item,
+            quantity: baseQuantity,
+            unit_id: productInfo?.base_unit_id,
+            display_quantity: item.quantity,
+            display_unit_id: item.unit_id,
+          };
+        });
+
+        // التحقق من الرصيد للصادرات
         if (multiForm.type === 'out') {
           const stockMap = getStockMapForWarehouse(multiForm.warehouse_id);
-          for (const item of items) {
+          for (const item of itemsToSave) {
             const currentStock = stockMap.get(item.product_id) || 0;
-            if (currentStock < (item.quantity as number)) {
+            if (currentStock < item.quantity) {
               toast({
                 title: 'خطأ في الكمية',
                 description: `المنتج ${getProductName(item.product_id)}: الرصيد المتوفر في المخزن هو ${currentStock} فقط.`,
@@ -589,19 +699,17 @@ const MovementsPage = () => {
               return;
             }
             const minQty = getProductMinQty(item.product_id);
-            const newStock = currentStock - (item.quantity as number);
+            const newStock = currentStock - item.quantity;
             if (newStock < minQty && minQty > 0) {
               toast({
                 title: '⚠️ تحذير: مخزون أقل من الحد الأدنى',
                 description: `المنتج ${getProductName(item.product_id)}: بعد الصرف سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}).`,
                 variant: 'destructive'
               });
-              return;
             }
           }
         }
 
-        const itemsToSave = items.map(item => ({ ...item, quantity: Number(item.quantity) }));
         const movementData: Omit<StockMovement, 'id' | 'created_at' | 'created_by'> = {
           type: multiForm.type,
           warehouse_id: multiForm.warehouse_id,
@@ -622,6 +730,7 @@ const MovementsPage = () => {
         });
       }
       setDialogOpen(false);
+      await refreshAll();
     } catch (error) {
       console.error('Error saving movement:', error);
       toast({ title: 'خطأ', description: 'حدث خطأ أثناء حفظ الحركة', variant: 'destructive' });
@@ -642,7 +751,7 @@ const MovementsPage = () => {
     setDeletingMovement(null);
   };
 
-  // دالة الطباعة المحسنة
+  // دالة الطباعة (تمرير getUnitName إلى دوال HTML)
   const printMovementNative = async (html: string, title: string) => {
     const platform = Capacitor.getPlatform();
     const tempDiv = document.createElement('div');
@@ -718,11 +827,11 @@ const MovementsPage = () => {
 
     if (m.product_id) {
       const productName = getProductName(m.product_id);
-      const html = buildMovementHtml(m, productName, warehouseName, entityName, userName, warehouseManager, baseUrl);
+      const html = buildMovementHtml(m, productName, warehouseName, entityName, userName, warehouseManager, baseUrl, getUnitName);
       await printMovementNative(html, m.type === 'in' ? 'سند_وارد' : 'سند_صادر');
     } else {
       const productsMap = new Map(products.map(p => [p.id, p.name]));
-      const html = buildMultiMovementHtml(m, warehouseName, entityName, userName, warehouseManager, productsMap, baseUrl);
+      const html = buildMultiMovementHtml(m, warehouseName, entityName, userName, warehouseManager, productsMap, baseUrl, getUnitName);
       await printMovementNative(html, m.type === 'in' ? 'سند_وارد_متعدد' : 'سند_صادر_متعدد');
     }
   };
@@ -830,7 +939,7 @@ const MovementsPage = () => {
                 <th className="text-right p-3 font-semibold text-foreground hidden md:table-cell">بواسطة</th>
                 <th className="text-right p-3 font-semibold text-foreground hidden lg:table-cell">التاريخ</th>
                 <th className="text-center p-3 font-semibold text-foreground">إجراءات</th>
-              </tr>
+               </tr>
             </thead>
             <tbody>
               {activeMovements.map((m, i) => (
@@ -850,8 +959,8 @@ const MovementsPage = () => {
                   {viewTab === 'single' ? (
                     <>
                       <td className="p-3 text-foreground">{getProductName(m.product_id)}</td>
-                      <td className="p-3 text-foreground font-semibold">{m.quantity}</td>
-                      <td className="p-3 text-foreground">{m.unit || 'قطعة'}</td>
+                      <td className="p-3 text-foreground font-semibold">{m.display_quantity ?? m.quantity}</td>
+                      <td className="p-3 text-foreground">{getUnitName(m.display_unit_id ?? m.unit_id)}</td>
                     </>
                   ) : (
                     <td className="p-3 text-foreground">
@@ -859,7 +968,7 @@ const MovementsPage = () => {
                         {(m.items || []).map((item, idx) => (
                           <div key={idx} className="text-xs">
                             <span className="font-medium">{getProductName(item.product_id)}</span>
-                            <span className="text-muted-foreground"> — {item.quantity} {item.unit}</span>
+                            <span className="text-muted-foreground"> — {item.display_quantity ?? item.quantity} {getUnitName(item.display_unit_id ?? item.unit_id)}</span>
                           </div>
                         ))}
                       </div>
@@ -1039,7 +1148,7 @@ const MovementsPage = () => {
                   <select
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={editSingleForm.product_id}
-                    onChange={e => setEditSingleForm({ ...editSingleForm, product_id: e.target.value })}
+                    onChange={e => setEditSingleForm({ ...editSingleForm, product_id: e.target.value, unit_id: '' })}
                   >
                     <option value="" disabled>اختر المنتج</option>
                     {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -1062,11 +1171,14 @@ const MovementsPage = () => {
                     <Label className="text-xs sm:text-sm">الوحدة <span className="text-destructive">*</span></Label>
                     <select
                       className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      value={editSingleForm.unit}
-                      onChange={e => setEditSingleForm({ ...editSingleForm, unit: e.target.value })}
+                      value={editSingleForm.unit_id}
+                      onChange={e => setEditSingleForm({ ...editSingleForm, unit_id: e.target.value })}
+                      disabled={!editSingleForm.product_id}
                     >
                       <option value="" disabled>اختر الوحدة</option>
-                      {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                      {getAvailableUnitsForProduct(editSingleForm.product_id).map(unit => (
+                        <option key={unit.id} value={unit.id}>{unit.name}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -1079,50 +1191,56 @@ const MovementsPage = () => {
                 <Label className="text-xs sm:text-sm">الأصناف <span className="text-destructive">*</span></Label>
                 <div className="border rounded-md p-2">
                   <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                    {editItems.map((item, index) => (
-                      <div key={index} className="border rounded-md p-2 space-y-2 bg-background">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm font-medium">صنف {index + 1}</span>
-                          <button onClick={() => removeEditItem(index)} className="text-destructive">
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <select
-                            value={item.product_id}
-                            onChange={(e) => updateEditItem(index, 'product_id', e.target.value)}
-                            className="w-full p-2 border rounded text-sm"
-                          >
-                            <option value="" disabled>اختر المنتج</option>
-                            {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                          </select>
-                          <div className="grid grid-cols-2 gap-2">
-                            <Input
-                              type="number"
-                              placeholder="الكمية"
-                              value={item.quantity === null ? '' : item.quantity}
-                              onChange={(e) => updateEditItem(index, 'quantity', e.target.value)}
-                              onKeyDown={preventDecimal}
-                              step="1"
-                              min="0"
-                            />
-                            <select
-                              value={item.unit}
-                              onChange={(e) => updateEditItem(index, 'unit', e.target.value)}
-                              className="p-2 border rounded text-sm"
-                            >
-                              <option value="" disabled>اختر الوحدة</option>
-                              {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                            </select>
+                    {editItems.map((item, index) => {
+                      const availableUnits = getAvailableUnitsForProduct(item.product_id);
+                      return (
+                        <div key={index} className="border rounded-md p-2 space-y-2 bg-background">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-medium">صنف {index + 1}</span>
+                            <button onClick={() => removeEditItem(index)} className="text-destructive">
+                              <X className="w-4 h-4" />
+                            </button>
                           </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <select
+                              value={item.product_id}
+                              onChange={(e) => updateEditItem(index, 'product_id', e.target.value)}
+                              className="w-full p-2 border rounded text-sm"
+                            >
+                              <option value="" disabled>اختر المنتج</option>
+                              {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                            <div className="grid grid-cols-2 gap-2">
+                              <Input
+                                type="number"
+                                placeholder="الكمية"
+                                value={item.quantity === null ? '' : item.quantity}
+                                onChange={(e) => updateEditItem(index, 'quantity', e.target.value)}
+                                onKeyDown={preventDecimal}
+                                step="1"
+                                min="0"
+                              />
+                              <select
+                                value={item.unit_id}
+                                onChange={(e) => updateEditItem(index, 'unit_id', e.target.value)}
+                                className="p-2 border rounded text-sm"
+                                disabled={!item.product_id}
+                              >
+                                <option value="" disabled>اختر الوحدة</option>
+                                {availableUnits.map(unit => (
+                                  <option key={unit.id} value={unit.id}>{unit.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          <Input
+                            placeholder="ملاحظات (اختياري)"
+                            value={item.notes || ''}
+                            onChange={(e) => updateEditItem(index, 'notes', e.target.value)}
+                          />
                         </div>
-                        <Input
-                          placeholder="ملاحظات (اختياري)"
-                          value={item.notes || ''}
-                          onChange={(e) => updateEditItem(index, 'notes', e.target.value)}
-                        />
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <Button onClick={addEditItem} variant="outline" size="sm" className="mt-2 w-full">
                     <Plus className="w-4 h-4 ml-1" /> إضافة صنف
@@ -1218,7 +1336,7 @@ const MovementsPage = () => {
                   <select
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={form.product_id}
-                    onChange={e => setForm({ ...form, product_id: e.target.value })}
+                    onChange={e => setForm({ ...form, product_id: e.target.value, unit_id: '' })}
                   >
                     <option value="" disabled>اختر المنتج</option>
                     {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -1241,11 +1359,14 @@ const MovementsPage = () => {
                     <Label className="text-xs sm:text-sm">الوحدة <span className="text-destructive">*</span></Label>
                     <select
                       className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      value={form.unit}
-                      onChange={e => setForm({ ...form, unit: e.target.value })}
+                      value={form.unit_id}
+                      onChange={e => setForm({ ...form, unit_id: e.target.value })}
+                      disabled={!form.product_id}
                     >
                       <option value="" disabled>اختر الوحدة</option>
-                      {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                      {getAvailableUnitsForProduct(form.product_id).map(unit => (
+                        <option key={unit.id} value={unit.id}>{unit.name}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -1259,50 +1380,56 @@ const MovementsPage = () => {
                 <div className="border rounded-md p-2">
                   {/* عرض الجوال: بطاقات */}
                   <div className="sm:hidden space-y-3">
-                    {items.map((item, index) => (
-                      <div key={index} className="border rounded-md p-2 space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm font-medium">صنف {index + 1}</span>
-                          <button onClick={() => removeItem(index)} className="text-destructive">
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                        <div className="space-y-2">
-                          <select
-                            value={item.product_id}
-                            onChange={(e) => updateItem(index, 'product_id', e.target.value)}
-                            className="w-full p-2 border rounded text-sm"
-                          >
-                            <option value="" disabled>اختر المنتج</option>
-                            {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                          </select>
-                          <div className="grid grid-cols-2 gap-2">
-                            <Input
-                              type="number"
-                              placeholder="الكمية"
-                              value={item.quantity === null ? '' : item.quantity}
-                              onChange={(e) => updateItem(index, 'quantity', e.target.value)}
-                              onKeyDown={preventDecimal}
-                              step="1"
-                              min="0"
-                            />
-                            <select
-                              value={item.unit}
-                              onChange={(e) => updateItem(index, 'unit', e.target.value)}
-                              className="p-2 border rounded text-sm"
-                            >
-                              <option value="" disabled>اختر الوحدة</option>
-                              {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                            </select>
+                    {items.map((item, index) => {
+                      const availableUnits = getAvailableUnitsForProduct(item.product_id);
+                      return (
+                        <div key={index} className="border rounded-md p-2 space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-medium">صنف {index + 1}</span>
+                            <button onClick={() => removeItem(index)} className="text-destructive">
+                              <X className="w-4 h-4" />
+                            </button>
                           </div>
-                          <Input
-                            placeholder="ملاحظات (اختياري)"
-                            value={item.notes || ''}
-                            onChange={(e) => updateItem(index, 'notes', e.target.value)}
-                          />
+                          <div className="space-y-2">
+                            <select
+                              value={item.product_id}
+                              onChange={(e) => updateItem(index, 'product_id', e.target.value)}
+                              className="w-full p-2 border rounded text-sm"
+                            >
+                              <option value="" disabled>اختر المنتج</option>
+                              {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                            <div className="grid grid-cols-2 gap-2">
+                              <Input
+                                type="number"
+                                placeholder="الكمية"
+                                value={item.quantity === null ? '' : item.quantity}
+                                onChange={(e) => updateItem(index, 'quantity', e.target.value)}
+                                onKeyDown={preventDecimal}
+                                step="1"
+                                min="0"
+                              />
+                              <select
+                                value={item.unit_id}
+                                onChange={(e) => updateItem(index, 'unit_id', e.target.value)}
+                                className="p-2 border rounded text-sm"
+                                disabled={!item.product_id}
+                              >
+                                <option value="" disabled>اختر الوحدة</option>
+                                {availableUnits.map(unit => (
+                                  <option key={unit.id} value={unit.id}>{unit.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <Input
+                              placeholder="ملاحظات (اختياري)"
+                              value={item.notes || ''}
+                              onChange={(e) => updateItem(index, 'notes', e.target.value)}
+                            />
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   {/* عرض سطح المكتب: جدول */}
@@ -1318,54 +1445,60 @@ const MovementsPage = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {items.map((item, index) => (
-                          <tr key={index} className="border-b">
-                            <td className="p-1">
-                              <select
-                                value={item.product_id}
-                                onChange={(e) => updateItem(index, 'product_id', e.target.value)}
-                                className="w-full p-1 border rounded text-sm"
-                              >
-                                <option value="" disabled>اختر المنتج</option>
-                                {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                              </select>
-                            </td>
-                            <td className="p-1">
-                              <Input
-                                type="number"
-                                value={item.quantity === null ? '' : item.quantity}
-                                onChange={(e) => updateItem(index, 'quantity', e.target.value)}
-                                onKeyDown={preventDecimal}
-                                step="1"
-                                min="0"
-                                className="w-20"
-                              />
-                            </td>
-                            <td className="p-1">
-                              <select
-                                value={item.unit}
-                                onChange={(e) => updateItem(index, 'unit', e.target.value)}
-                                className="w-20 p-1 border rounded text-sm"
-                              >
-                                <option value="" disabled>اختر الوحدة</option>
-                                {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                              </select>
-                            </td>
-                            <td className="p-1">
-                              <Input
-                                value={item.notes || ''}
-                                onChange={(e) => updateItem(index, 'notes', e.target.value)}
-                                placeholder="ملاحظة"
-                                className="w-32"
-                              />
-                            </td>
-                            <td className="p-1">
-                              <button onClick={() => removeItem(index)} className="text-destructive">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                        {items.map((item, index) => {
+                          const availableUnits = getAvailableUnitsForProduct(item.product_id);
+                          return (
+                            <tr key={index} className="border-b">
+                              <td className="p-1">
+                                <select
+                                  value={item.product_id}
+                                  onChange={(e) => updateItem(index, 'product_id', e.target.value)}
+                                  className="w-full p-1 border rounded text-sm"
+                                >
+                                  <option value="" disabled>اختر المنتج</option>
+                                  {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                </select>
+                              </td>
+                              <td className="p-1">
+                                <Input
+                                  type="number"
+                                  value={item.quantity === null ? '' : item.quantity}
+                                  onChange={(e) => updateItem(index, 'quantity', e.target.value)}
+                                  onKeyDown={preventDecimal}
+                                  step="1"
+                                  min="0"
+                                  className="w-20"
+                                />
+                              </td>
+                              <td className="p-1">
+                                <select
+                                  value={item.unit_id}
+                                  onChange={(e) => updateItem(index, 'unit_id', e.target.value)}
+                                  className="w-20 p-1 border rounded text-sm"
+                                  disabled={!item.product_id}
+                                >
+                                  <option value="" disabled>اختر الوحدة</option>
+                                  {availableUnits.map(unit => (
+                                    <option key={unit.id} value={unit.id}>{unit.name}</option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="p-1">
+                                <Input
+                                  value={item.notes || ''}
+                                  onChange={(e) => updateItem(index, 'notes', e.target.value)}
+                                  placeholder="ملاحظة"
+                                  className="w-32"
+                                />
+                              </td>
+                              <td className="p-1">
+                                <button onClick={() => removeItem(index)} className="text-destructive">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
