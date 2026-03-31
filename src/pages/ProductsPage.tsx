@@ -15,7 +15,7 @@ const ProductsPage = () => {
     products, categories, warehouses, movements, 
     addProduct, updateProduct, deleteProduct, 
     getCategoryName, getWarehouseName, refreshAll,
-    units, getUnitName                    // ✅ إضافة الوحدات
+    units, getUnitName
   } = useWarehouse();
   const { toast } = useToast();
   const { isAdmin } = useAuth();
@@ -86,9 +86,27 @@ const ProductsPage = () => {
     return whNames.join('، ') || '-';
   };
 
-  const getDisplayQty = (productId: string) => {
-    if (selectedWarehouse) return getWarehouseQty(productId, selectedWarehouse);
-    return getProductTotalQty(productId);
+  // ✅ الكمية المعروضة (محولة إلى الوحدة المعروضة)
+  const getDisplayQty = (product: Product) => {
+    const totalBaseQty = selectedWarehouse 
+      ? getWarehouseQty(product.id, selectedWarehouse) 
+      : getProductTotalQty(product.id);
+    
+    if (product.display_unit_id && product.pack_size && product.pack_size > 1) {
+      return totalBaseQty / product.pack_size;
+    }
+    return totalBaseQty;
+  };
+
+  // ✅ الحصول على نمط اللون بناءً على الكمية المعروضة
+  const getQuantityStyle = (product: Product, qty: number) => {
+    const threshold = product.min_quantity ?? 2;
+    const displayThreshold = product.display_unit_id && product.pack_size && product.pack_size > 1
+      ? threshold / product.pack_size
+      : threshold;
+    if (qty === 0) return 'bg-destructive/10 text-destructive';
+    if (qty <= displayThreshold) return 'bg-warning/10 text-warning';
+    return 'bg-success/10 text-success';
   };
 
   // ========== دوال التحقق ==========
@@ -257,14 +275,6 @@ const ProductsPage = () => {
     setDeletingProduct(null);
   };
 
-  const getQuantityStyle = (product: Product) => {
-    const qty = getDisplayQty(product.id);
-    const threshold = product.min_quantity ?? 2;
-    if (qty === 0) return 'bg-destructive/10 text-destructive';
-    if (qty <= threshold) return 'bg-warning/10 text-warning';
-    return 'bg-success/10 text-success';
-  };
-
   // ========== عرض معلومات العبوة ==========
   const getPackInfo = () => {
     if (!form.display_unit_id || !form.base_unit_id) return '';
@@ -278,10 +288,11 @@ const ProductsPage = () => {
 
   // ========== بطاقة المنتج للجوال ==========
   const MobileCard = ({ p }: { p: Product }) => {
-    const qty = getDisplayQty(p.id);
+    const qty = getDisplayQty(p);
     const threshold = p.min_quantity ?? 2;
     const displayUnitName = getUnitName(p.display_unit_id || '');
     const baseUnitName = getUnitName(p.base_unit_id || '');
+    const qtyStyle = getQuantityStyle(p, qty);
     return (
       <div className="bg-card rounded-xl p-3 border border-border shadow-card space-y-2">
         <div className="flex items-start justify-between">
@@ -300,7 +311,7 @@ const ProductsPage = () => {
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <span>الصنف: {getCategoryName(p.category_id || '')}</span>
           {!selectedWarehouse && <span>المخازن: {getProductWarehouses(p.id)}</span>}
-          <span>الكمية: <span className={`font-bold ${getQuantityStyle(p)}`}>{qty}</span></span>
+          <span>الكمية: <span className={`font-bold ${qtyStyle}`}>{qty.toFixed(2)}</span></span>
           <span>الوحدة: {displayUnitName || p.unit || 'قطعة'}</span>
           <span>حد التنبيه: {threshold}</span>
           {p.pack_size && p.pack_size > 1 && (
@@ -375,12 +386,12 @@ const ProductsPage = () => {
                 <th className="text-right p-3 font-semibold text-foreground">حد التنبيه</th>
                 {!selectedWarehouse && <th className="text-right p-3 font-semibold text-foreground hidden lg:table-cell">المخازن</th>}
                 <th className="text-center p-3 font-semibold text-foreground">إجراءات</th>
-              </tr>
+               </tr>
             </thead>
             <tbody>
               {filtered.map(p => {
-                const qty = getDisplayQty(p.id);
-                const threshold = p.min_quantity ?? 2;
+                const qty = getDisplayQty(p);
+                const qtyStyle = getQuantityStyle(p, qty);
                 const displayUnitName = getUnitName(p.display_unit_id || '');
                 const packInfo = p.pack_size && p.pack_size > 1 ? `${p.pack_size} ${getUnitName(p.base_unit_id || '')}` : '-';
                 return (
@@ -390,11 +401,11 @@ const ProductsPage = () => {
                     <td className="p-3 text-muted-foreground font-mono text-xs">{p.code}</td>
                     <td className="p-3 text-muted-foreground hidden md:table-cell">{getCategoryName(p.category_id || '')}</td>
                     <td className="p-3">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${getQuantityStyle(p)}`}>{qty}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${qtyStyle}`}>{qty.toFixed(2)}</span>
                     </td>
                     <td className="p-3 text-muted-foreground">{displayUnitName || p.unit || 'قطعة'}</td>
                     <td className="p-3 text-muted-foreground text-xs">{packInfo}</td>
-                    <td className="p-3 text-muted-foreground">{threshold}</td>
+                    <td className="p-3 text-muted-foreground">{p.min_quantity ?? 2}</td>
                     {!selectedWarehouse && <td className="p-3 text-muted-foreground hidden lg:table-cell">{getProductWarehouses(p.id)}</td>}
                     <td className="p-3">
                       <div className="flex items-center justify-center gap-1">
@@ -450,7 +461,7 @@ const ProductsPage = () => {
               </select>
             </div>
 
-            {/* ✅ حقول الوحدات */}
+            {/* حقول الوحدات */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs sm:text-sm">الوحدة الأساسية</Label>
