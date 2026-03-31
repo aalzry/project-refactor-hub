@@ -28,7 +28,6 @@ export const MovementCard: React.FC<MovementCardProps> = ({
   const { getProductName, getWarehouseName, getSupplierName, getClientName, getUnitName } = useWarehouse();
   const isSingle = !!movement.product_id;
 
-  // دالة مساعدة لعرض الكمية والوحدة
   const getQuantityDisplay = () => {
     if (isSingle) {
       const quantity = movement.display_quantity ?? movement.quantity ?? 0;
@@ -36,7 +35,6 @@ export const MovementCard: React.FC<MovementCardProps> = ({
       const unitName = unitId ? getUnitName(unitId) : (movement.unit || 'قطعة');
       return `${quantity} ${unitName}`;
     } else {
-      // للحركة المتعددة نعرض عدد الأصناف، والتفاصيل داخل البطاقة يمكن عرضها بشكل مختصر
       return `${movement.items?.length || 0} أصناف`;
     }
   };
@@ -90,7 +88,6 @@ export const MovementCard: React.FC<MovementCardProps> = ({
             <span>الكمية: <strong className="text-foreground">{getQuantityDisplay()}</strong></span>
           </>
         ) : (
-          // في حالة الحركة المتعددة، نعرض أول صنفين كعينة (اختياري)
           <div className="w-full space-y-0.5">
             {(movement.items || []).slice(0, 2).map((item, idx) => {
               const quantity = item.display_quantity ?? item.quantity ?? 0;
