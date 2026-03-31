@@ -11,7 +11,7 @@ interface MovementCardProps {
   onEdit: () => void;
   onDelete: () => void;
   onPrint: () => void;
-  onDuplicate?: () => void; // ✅ دالة نسخ الحركة (اختيارية)
+  onDuplicate?: () => void;
   showCheckbox: boolean;
 }
 
@@ -25,8 +25,21 @@ export const MovementCard: React.FC<MovementCardProps> = ({
   onDuplicate,
   showCheckbox,
 }) => {
-  const { getProductName, getWarehouseName, getSupplierName, getClientName } = useWarehouse();
+  const { getProductName, getWarehouseName, getSupplierName, getClientName, getUnitName } = useWarehouse();
   const isSingle = !!movement.product_id;
+
+  // دالة مساعدة لعرض الكمية والوحدة
+  const getQuantityDisplay = () => {
+    if (isSingle) {
+      const quantity = movement.display_quantity ?? movement.quantity ?? 0;
+      const unitId = movement.display_unit_id ?? movement.unit_id;
+      const unitName = unitId ? getUnitName(unitId) : (movement.unit || 'قطعة');
+      return `${quantity} ${unitName}`;
+    } else {
+      // للحركة المتعددة نعرض عدد الأصناف، والتفاصيل داخل البطاقة يمكن عرضها بشكل مختصر
+      return `${movement.items?.length || 0} أصناف`;
+    }
+  };
 
   return (
     <div className="bg-card rounded-xl p-3 border border-border shadow-card space-y-2">
@@ -44,23 +57,19 @@ export const MovementCard: React.FC<MovementCardProps> = ({
           <span className="text-xs text-muted-foreground">{movement.date}</span>
         </div>
         <div className="flex gap-1">
-          {/* زر التعديل */}
           <button onClick={onEdit} className="p-1.5 rounded-md hover:bg-primary/10 text-primary">
             <Pencil className="w-3.5 h-3.5" />
           </button>
-          {/* زر الحذف (يظهر فقط للمسؤول) */}
           {showCheckbox && (
             <button onClick={onDelete} className="p-1.5 rounded-md hover:bg-destructive/10 text-destructive">
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           )}
-          {/* زر نسخ الحركة (يظهر فقط إذا تم تمرير الدالة) */}
           {onDuplicate && (
             <button onClick={onDuplicate} className="p-1.5 rounded-md hover:bg-accent/20 text-accent">
               <Copy className="w-3.5 h-3.5" />
             </button>
           )}
-          {/* زر الطباعة */}
           <button onClick={onPrint} className="p-1.5 rounded-md hover:bg-accent/20 text-accent">
             <FileText className="w-3.5 h-3.5" />
           </button>
@@ -78,20 +87,37 @@ export const MovementCard: React.FC<MovementCardProps> = ({
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
         {isSingle ? (
           <>
-            <span>الكمية: <strong className="text-foreground">{movement.quantity}</strong></span>
-            <span>الوحدة: <strong className="text-foreground">{movement.unit || 'قطعة'}</strong></span>
+            <span>الكمية: <strong className="text-foreground">{getQuantityDisplay()}</strong></span>
           </>
         ) : (
-          <span>عدد الأصناف: <strong className="text-foreground">{movement.items?.length || 0}</strong></span>
+          // في حالة الحركة المتعددة، نعرض أول صنفين كعينة (اختياري)
+          <div className="w-full space-y-0.5">
+            {(movement.items || []).slice(0, 2).map((item, idx) => {
+              const quantity = item.display_quantity ?? item.quantity ?? 0;
+              const unitId = item.display_unit_id ?? item.unit_id;
+              const unitName = unitId ? getUnitName(unitId) : (item.unit || 'قطعة');
+              return (
+                <div key={idx} className="text-xs">
+                  <span className="font-medium">{getProductName(item.product_id)}</span>
+                  <span className="text-muted-foreground"> — {quantity} {unitName}</span>
+                </div>
+              );
+            })}
+            {(movement.items?.length || 0) > 2 && (
+              <div className="text-xs text-muted-foreground">+{movement.items!.length - 2} منتجات أخرى</div>
+            )}
+          </div>
         )}
-        <span>المخزن: {getWarehouseName(movement.warehouse_id)}</span>
-        <span>
-          {movement.entity_type === 'supplier' ? 'المورد' : 'جهة الصرف'}: {
-            movement.entity_type === 'supplier'
-              ? getSupplierName(movement.entity_id)
-              : getClientName(movement.entity_id)
-          }
-        </span>
+        <div className="flex justify-between w-full mt-1">
+          <span>المخزن: {getWarehouseName(movement.warehouse_id)}</span>
+          <span>
+            {movement.entity_type === 'supplier' ? 'المورد' : 'جهة الصرف'}: {
+              movement.entity_type === 'supplier'
+                ? getSupplierName(movement.entity_id)
+                : getClientName(movement.entity_id)
+            }
+          </span>
+        </div>
       </div>
     </div>
   );
