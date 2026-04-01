@@ -124,7 +124,6 @@ const Dashboard = () => {
                      {p.name}: {getActualQty(p)} {p.unit || 'قطعة'} (الحد: {getMinQuantity(p)})
                      {p.warehouse_id && ` - ${getWarehouseName(p.warehouse_id)}`}
                    </span>
-                  </span>
                 ))}
                 {criticalStock.length > 5 && (
                   <span className="text-[10px] text-muted-foreground">+{criticalStock.length - 5} منتجات أخرى</span>
