@@ -86,7 +86,7 @@ const ProductsPage = () => {
     return whNames.join('، ') || '-';
   };
 
-  // ✅ الكمية المعروضة (محولة إلى الوحدة المعروضة)
+  // ✅ الكمية المعروضة (محولة إلى الوحدة المعروضة) – تستخدم للتحذير فقط
   const getDisplayQty = (product: Product) => {
     const totalBaseQty = selectedWarehouse 
       ? getWarehouseQty(product.id, selectedWarehouse) 
@@ -98,7 +98,33 @@ const ProductsPage = () => {
     return totalBaseQty;
   };
 
-  // ✅ الحصول على نمط اللون بناءً على الكمية المعروضة
+  // ✅ صيغة العرض المختلطة (مثال: 1 كيس و 25 كيلو)
+  const getFormattedQuantity = (product: Product): string => {
+    const totalBaseQty = selectedWarehouse 
+      ? getWarehouseQty(product.id, selectedWarehouse) 
+      : getProductTotalQty(product.id);
+    
+    // إذا لم تكن هناك وحدة معروضة أو حجم العبوة = 1، نعرض الكمية العادية
+    if (!product.display_unit_id || !product.pack_size || product.pack_size <= 1) {
+      return `${totalBaseQty}`;
+    }
+    
+    const wholeUnits = Math.floor(totalBaseQty / product.pack_size);
+    const remainder = totalBaseQty % product.pack_size;
+    
+    const displayUnitName = getUnitName(product.display_unit_id);
+    const baseUnitName = getUnitName(product.base_unit_id || '');
+    
+    if (wholeUnits === 0) {
+      return `${remainder} ${baseUnitName}`;
+    }
+    if (remainder === 0) {
+      return `${wholeUnits} ${displayUnitName}`;
+    }
+    return `${wholeUnits} ${displayUnitName} و ${remainder} ${baseUnitName}`;
+  };
+
+  // ✅ الحصول على نمط اللون بناءً على الكمية المعروضة (قيمة عشرية)
   const getQuantityStyle = (product: Product, qty: number) => {
     const threshold = product.min_quantity ?? 2;
     const displayThreshold = product.display_unit_id && product.pack_size && product.pack_size > 1
@@ -289,10 +315,9 @@ const ProductsPage = () => {
   // ========== بطاقة المنتج للجوال ==========
   const MobileCard = ({ p }: { p: Product }) => {
     const qty = getDisplayQty(p);
-    const threshold = p.min_quantity ?? 2;
+    const qtyStyle = getQuantityStyle(p, qty);
     const displayUnitName = getUnitName(p.display_unit_id || '');
     const baseUnitName = getUnitName(p.base_unit_id || '');
-    const qtyStyle = getQuantityStyle(p, qty);
     return (
       <div className="bg-card rounded-xl p-3 border border-border shadow-card space-y-2">
         <div className="flex items-start justify-between">
@@ -311,9 +336,9 @@ const ProductsPage = () => {
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <span>الصنف: {getCategoryName(p.category_id || '')}</span>
           {!selectedWarehouse && <span>المخازن: {getProductWarehouses(p.id)}</span>}
-          <span>الكمية: <span className={`font-bold ${qtyStyle}`}>{qty.toFixed(2)}</span></span>
+          <span>الكمية: <span className={`font-bold ${qtyStyle}`}>{getFormattedQuantity(p)}</span></span>
           <span>الوحدة: {displayUnitName || p.unit || 'قطعة'}</span>
-          <span>حد التنبيه: {threshold}</span>
+          <span>حد التنبيه: {p.min_quantity ?? 2}</span>
           {p.pack_size && p.pack_size > 1 && (
             <span className="text-[10px] text-muted-foreground">
               {p.pack_size} {baseUnitName} / {displayUnitName}
@@ -401,7 +426,9 @@ const ProductsPage = () => {
                     <td className="p-3 text-muted-foreground font-mono text-xs">{p.code}</td>
                     <td className="p-3 text-muted-foreground hidden md:table-cell">{getCategoryName(p.category_id || '')}</td>
                     <td className="p-3">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${qtyStyle}`}>{qty.toFixed(2)}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${qtyStyle}`}>
+                        {getFormattedQuantity(p)}
+                      </span>
                     </td>
                     <td className="p-3 text-muted-foreground">{displayUnitName || p.unit || 'قطعة'}</td>
                     <td className="p-3 text-muted-foreground text-xs">{packInfo}</td>
