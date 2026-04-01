@@ -254,7 +254,7 @@ const Dashboard = () => {
                     </span>
                   </div>
                   <span className={`text-xs sm:text-sm font-bold px-2 py-0.5 rounded-full ${getStockAlertColor(p)}`}>
-                    {p.quantity} {p.unit || 'قطعة'}
+                    {getActualQty(p)} {p.unit || 'قطعة'}
                   </span>
                 </div>
               ))}
