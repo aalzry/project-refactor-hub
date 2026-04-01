@@ -43,11 +43,11 @@ export interface Warehouse {
 export interface Supplier {
   id: string;
   name: string;
-  phone: string;
-  email: string;
-  address: string;
+  phone?: string;
+  email?: string;
+  address?: string;
   notes?: string;
-  created_by: string | null;
+  created_by?: string | null;
   created_at: string;
 }
 
