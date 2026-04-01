@@ -60,7 +60,7 @@ export interface Product {
   base_unit_id?: string | null;
   display_unit_id?: string | null;
   created_at: string;
-  created_by: string;
+  created_by?: string | null;
 }
 
 export interface Category {
