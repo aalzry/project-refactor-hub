@@ -30,6 +30,19 @@ const AppLayout = ({ children }: { children: ReactNode }) => {
   const { displayName, role, signOut } = useAuth();
   const { t, dir } = useLanguage();
 
+  // تهيئة وعرض إعلان البانر
+  useEffect(() => {
+    const initAds = async () => {
+      await AdService.initialize();
+      await AdService.showBanner();
+    };
+    initAds();
+    
+    return () => {
+      AdService.hideBanner();
+    };
+  }, []);
+
   return (
     <div className="flex min-h-screen bg-background" dir={dir}>
       {/* Mobile overlay */}
