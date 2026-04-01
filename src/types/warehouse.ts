@@ -54,10 +54,10 @@ export interface Supplier {
 export interface Client {
   id: string;
   name: string;
-  phone: string;
-  address: string;
+  phone?: string;
+  address?: string;
   notes?: string;
-  created_by: string | null;
+  created_by?: string | null;
   created_at: string;
 }
 
