@@ -34,7 +34,7 @@ export interface StockMovement {
   date: string;
   notes?: string;
   created_at: string;
-  created_by: string;
+  created_by?: string | null;
   product_id?: string | null;
   quantity?: number | null;
   unit?: string | null;
