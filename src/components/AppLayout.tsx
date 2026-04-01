@@ -1,4 +1,4 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Package, FolderOpen, Building2, Truck, Users,
@@ -9,6 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import NotificationBell from '@/components/NotificationBell';
 import { TranslationKey } from '@/i18n/translations';
+import { AdService } from '@/services/adService';
 
 const navItems: { path: string; labelKey: TranslationKey; icon: any }[] = [
   { path: '/', labelKey: 'nav_dashboard', icon: LayoutDashboard },
