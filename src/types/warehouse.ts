@@ -25,7 +25,7 @@ export interface Category {
   id: string;
   name: string;
   description?: string;
-  created_by: string | null;
+  created_by?: string | null;
   created_at: string;
 }
 

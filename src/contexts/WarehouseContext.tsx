@@ -100,7 +100,7 @@ export interface Client {
   address?: string;
   notes?: string;
   created_at: string;
-  created_by: string;
+  created_by?: string | null;
 }
 
 export interface Unit {
