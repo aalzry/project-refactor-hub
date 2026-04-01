@@ -5,6 +5,7 @@ import { Package, Building2, Truck, ArrowLeftRight, AlertTriangle, TrendingUp, R
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
+import { getProductTotalQty } from '@/pages/movements/reportsUtils';
 
 const CHART_COLORS = ['hsl(174, 62%, 38%)', 'hsl(37, 95%, 55%)', 'hsl(220, 30%, 40%)', 'hsl(152, 60%, 40%)', 'hsl(0, 72%, 51%)'];
 
