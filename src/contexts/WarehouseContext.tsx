@@ -18,7 +18,7 @@ export type MovementType = 'in' | 'out';
 export interface MovementItem {
   product_id: string;
   quantity: number | null;
-  unit: string;
+  unit?: string;
   notes?: string;
   unit_id?: string;
   display_quantity?: number | null;
