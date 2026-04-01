@@ -32,11 +32,11 @@ export interface Category {
 export interface Warehouse {
   id: string;
   name: string;
-  type: string;
-  location: string;
-  manager: string;
+  type?: string;
+  location?: string;
+  manager?: string;
   notes?: string;
-  created_by: string | null;
+  created_by?: string | null;
   created_at: string;
 }
 
