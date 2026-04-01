@@ -1,7 +1,7 @@
 // ============================================================================
-// ملف: src/pages/movements/ReportsPage.tsx (محدث - دعم الصيغة المختلطة للكميات)
+// ملف: src/pages/movements/ReportsPage.tsx (محدث - دعم الصيغة المختلطة للكميات + ملخص الحركات)
 // ============================================================================
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useWarehouse } from '@/contexts/WarehouseContext';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -46,6 +46,9 @@ const ReportsPage = () => {
   const [movementFilter, setMovementFilter] = useState<'all' | 'in' | 'out'>('all');
   const [selectedWarehouse, setSelectedWarehouse] = useState('');
 
+  // ========== حالة التبديل بين عرض تفصيلي وملخص حسب المنتج في الحركات ==========
+  const [groupByProduct, setGroupByProduct] = useState(false);
+
   // الحصول على اسم مدير المخزن المحدد
   const warehouseManager = selectedWarehouse
     ? warehouses.find(w => w.id === selectedWarehouse)?.manager || 'غير محدد'
@@ -63,7 +66,7 @@ const ReportsPage = () => {
     return totalBaseQty;
   };
 
-  // ✅ صيغة مختلطة (مثال: 1 كيس و 25 كيلو)
+  // ✅ صيغة مختلطة للمنتجات (مثال: 1 كيس و 25 كيلو)
   const getFormattedQuantityForProduct = (product: Product): string => {
     const totalBaseQty = selectedWarehouse
       ? getWarehouseQty(movements, product.id, selectedWarehouse)
@@ -96,6 +99,24 @@ const ReportsPage = () => {
     return movement.unit || 'قطعة';
   };
 
+  // صيغة مختلطة للكمية الصافية لمنتج معين (تُستخدم في ملخص الحركات)
+  const getFormattedNetQty = (productId: string, netQty: number) => {
+    const product = products.find(p => p.id === productId);
+    if (!product) return `${netQty}`;
+    if (!product.display_unit_id || !product.pack_size || product.pack_size <= 1) {
+      return `${netQty}`;
+    }
+    const absQty = Math.abs(netQty);
+    const wholeUnits = Math.floor(absQty / product.pack_size);
+    const remainder = absQty % product.pack_size;
+    const displayUnitName = getUnitName(product.display_unit_id);
+    const baseUnitName = getUnitName(product.base_unit_id || '');
+    const sign = netQty < 0 ? '-' : '';
+    if (wholeUnits === 0) return `${sign}${remainder} ${baseUnitName}`;
+    if (remainder === 0) return `${sign}${wholeUnits} ${displayUnitName}`;
+    return `${sign}${wholeUnits} ${displayUnitName} و ${remainder} ${baseUnitName}`;
+  };
+
   const filteredProducts = selectedWarehouse
     ? products.filter(p =>
         movements.some(m =>
@@ -114,6 +135,25 @@ const ReportsPage = () => {
     .filter(m => (!dateFrom || m.date >= dateFrom) && (!dateTo || m.date <= dateTo))
     .filter(m => !selectedWarehouse || m.warehouse_id === selectedWarehouse)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  // تجميع الحركات حسب المنتج (صافي الكمية)
+  const groupedByProduct = useMemo(() => {
+    const map = new Map<string, { productId: string; productName: string; netQty: number }>();
+    filteredExpanded.forEach(m => {
+      const existing = map.get(m.product_id);
+      const qty = m.type === 'in' ? m.quantity : -m.quantity;
+      if (existing) {
+        existing.netQty += qty;
+      } else {
+        map.set(m.product_id, {
+          productId: m.product_id,
+          productName: m.productName,
+          netQty: qty,
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [filteredExpanded]);
 
   const warehouseStock = (selectedWarehouse ? warehouses.filter(w => w.id === selectedWarehouse) : warehouses).map(w => {
     const productIds = new Set<string>();
@@ -286,46 +326,77 @@ const ReportsPage = () => {
 
   const exportMovementsExcel = () => {
     if (!checkWarehouseSelected()) return;
-    exportExcel(
-      filteredExpanded.map(m => ({
-        'التاريخ': m.date,
-        'النوع': m.type === 'in' ? 'وارد' : 'صادر',
-        'المنتج': m.productName,
-        'الكمية': getMovementDisplayQty(m),
-        'الوحدة': getMovementDisplayUnit(m),
-        'المخزن': getWarehouseName(m.warehouse_id),
-        'المورد': m.entity_type === 'supplier' ? getSupplierName(m.entity_id) : '-',
-        'جهة الصرف': m.entity_type === 'client' ? getClientName(m.entity_id) : '-',
-        'ملاحظات': m.notes || '',
-      })),
-      'الحركات',
-      'تقرير_الحركات'
-    );
+    if (groupByProduct) {
+      exportExcel(
+        groupedByProduct.map(item => ({
+          'المنتج': item.productName,
+          'صافي الكمية': getFormattedNetQty(item.productId, item.netQty),
+          'المخزن': getWarehouseName(selectedWarehouse),
+        })),
+        'ملخص_الحركات',
+        'ملخص_الحركات'
+      );
+    } else {
+      exportExcel(
+        filteredExpanded.map(m => ({
+          'التاريخ': m.date,
+          'النوع': m.type === 'in' ? 'وارد' : 'صادر',
+          'المنتج': m.productName,
+          'الكمية': getMovementDisplayQty(m),
+          'الوحدة': getMovementDisplayUnit(m),
+          'المخزن': getWarehouseName(m.warehouse_id),
+          'المورد': m.entity_type === 'supplier' ? getSupplierName(m.entity_id) : '-',
+          'جهة الصرف': m.entity_type === 'client' ? getClientName(m.entity_id) : '-',
+          'ملاحظات': m.notes || '',
+        })),
+        'الحركات',
+        'تقرير_الحركات'
+      );
+    }
   };
 
   const exportMovementsPdf = () => {
     if (!checkWarehouseSelected()) return;
-    const rows = filteredExpanded.map((m, i) => [
-      String(i + 1),
-      m.date,
-      m.type === 'in' ? 'وارد' : 'صادر',
-      m.productName,
-      String(getMovementDisplayQty(m)),
-      getMovementDisplayUnit(m),
-      getWarehouseName(m.warehouse_id),
-      m.entity_type === 'supplier' ? getSupplierName(m.entity_id) : '-',
-      m.entity_type === 'client' ? getClientName(m.entity_id) : '-',
-    ]);
-    const html = buildSimplePdfHtml(
-      'تقرير حركة المخزون',
-      ['م', 'التاريخ', 'النوع', 'المنتج', 'الكمية', 'الوحدة', 'المخزن', 'المورد', 'جهة الصرف'],
-      rows,
-      selectedWarehouse,
-      getWarehouseName,
-      warehouseManager,
-      displayName || '__________'
-    );
-    printPdfFromHtml(html, 'تقرير_الحركات', toast);
+    if (groupByProduct) {
+      const rows = groupedByProduct.map((item, i) => [
+        String(i + 1),
+        item.productName,
+        getFormattedNetQty(item.productId, item.netQty),
+        getWarehouseName(selectedWarehouse),
+      ]);
+      const html = buildSimplePdfHtml(
+        'ملخص حركات المخزون حسب المنتج',
+        ['م', 'المنتج', 'صافي الكمية', 'المخزن'],
+        rows,
+        selectedWarehouse,
+        getWarehouseName,
+        warehouseManager,
+        displayName || '__________'
+      );
+      printPdfFromHtml(html, 'ملخص_الحركات', toast);
+    } else {
+      const rows = filteredExpanded.map((m, i) => [
+        String(i + 1),
+        m.date,
+        m.type === 'in' ? 'وارد' : 'صادر',
+        m.productName,
+        String(getMovementDisplayQty(m)),
+        getMovementDisplayUnit(m),
+        getWarehouseName(m.warehouse_id),
+        m.entity_type === 'supplier' ? getSupplierName(m.entity_id) : '-',
+        m.entity_type === 'client' ? getClientName(m.entity_id) : '-',
+      ]);
+      const html = buildSimplePdfHtml(
+        'تقرير حركة المخزون',
+        ['م', 'التاريخ', 'النوع', 'المنتج', 'الكمية', 'الوحدة', 'المخزن', 'المورد', 'جهة الصرف'],
+        rows,
+        selectedWarehouse,
+        getWarehouseName,
+        warehouseManager,
+        displayName || '__________'
+      );
+      printPdfFromHtml(html, 'تقرير_الحركات', toast);
+    }
   };
 
   const exportWarehousesExcel = () => {
@@ -608,7 +679,7 @@ const ReportsPage = () => {
                     <th className="text-right p-2 sm:p-3 font-semibold">جهة الصرف</th>
                     <th className="text-right p-2 sm:p-3 font-semibold">الكمية المتبقية</th>
                     <th className="text-right p-2 sm:p-3 font-semibold">الوحدة</th>
-                  </tr>
+                   </tr>
                 </thead>
                 <tbody>
                   {filteredProducts.map((p, i) => {
@@ -667,17 +738,25 @@ const ReportsPage = () => {
             </div>
           </div>
           <div className="bg-card rounded-lg sm:rounded-xl border border-border shadow-card overflow-hidden">
-            <div className="flex items-center justify-between p-3 sm:p-4 border-b border-border gap-2">
+            <div className="flex items-center justify-between p-3 sm:p-4 border-b border-border gap-2 flex-wrap">
               <h3 className="font-semibold text-foreground text-sm sm:text-base">
-                جدول الحركات ({filteredExpanded.length} عنصر)
+                جدول الحركات ({groupByProduct ? groupedByProduct.length : filteredExpanded.length} عنصر)
               </h3>
-              <div className="flex gap-1.5 sm:gap-2 shrink-0">
-                <Button size="sm" variant="outline" onClick={exportMovementsExcel} className="text-[10px] sm:text-xs gap-1 sm:gap-1.5 h-7 sm:h-8 px-2 sm:px-3">
-                  <FileSpreadsheet className="w-3 h-3 sm:w-3.5 sm:h-3.5" />Excel
+              <div className="flex gap-2">
+                <Button size="sm" variant={!groupByProduct ? "default" : "outline"} onClick={() => setGroupByProduct(false)}>
+                  عرض تفصيلي
                 </Button>
-                <Button size="sm" variant="outline" onClick={exportMovementsPdf} className="text-[10px] sm:text-xs gap-1 sm:gap-1.5 h-7 sm:h-8 px-2 sm:px-3">
-                  <FileText className="w-3 h-3 sm:w-3.5 sm:h-3.5" />PDF
+                <Button size="sm" variant={groupByProduct ? "default" : "outline"} onClick={() => setGroupByProduct(true)}>
+                  عرض ملخص حسب المنتج
                 </Button>
+                <div className="flex gap-1.5 sm:gap-2">
+                  <Button size="sm" variant="outline" onClick={exportMovementsExcel} className="text-[10px] sm:text-xs gap-1 sm:gap-1.5 h-7 sm:h-8 px-2 sm:px-3">
+                    <FileSpreadsheet className="w-3 h-3 sm:w-3.5 sm:h-3.5" />Excel
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={exportMovementsPdf} className="text-[10px] sm:text-xs gap-1 sm:gap-1.5 h-7 sm:h-8 px-2 sm:px-3">
+                    <FileText className="w-3 h-3 sm:w-3.5 sm:h-3.5" />PDF
+                  </Button>
+                </div>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -696,23 +775,42 @@ const ReportsPage = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredExpanded.map((m, i) => (
-                    <tr key={m.itemId} className="border-b border-border last:border-0 hover:bg-secondary/30">
-                      <td className="p-2 sm:p-3">{i + 1}</td>
-                      <td className="p-2 sm:p-3 text-muted-foreground">{m.date}</td>
-                      <td className="p-2 sm:p-3">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                          m.type === 'in' ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
-                        }`}>{m.type === 'in' ? 'وارد' : 'صادر'}</span>
-                      </td>
-                      <td className="p-2 sm:p-3 font-medium">{m.productName}</td>
-                      <td className="p-2 sm:p-3 font-bold">{getMovementDisplayQty(m)}</td>
-                      <td className="p-2 sm:p-3 text-muted-foreground">{getMovementDisplayUnit(m)}</td>
-                      <td className="p-2 sm:p-3 text-muted-foreground">{getWarehouseName(m.warehouse_id)}</td>
-                      <td className="p-2 sm:p-3 text-muted-foreground">{m.entity_type === 'supplier' ? getSupplierName(m.entity_id) : '-'}</td>
-                      <td className="p-2 sm:p-3 text-muted-foreground">{m.entity_type === 'client' ? getClientName(m.entity_id) : '-'}</td>
-                    </tr>
-                  ))}
+                  {groupByProduct ? (
+                    groupedByProduct.map((item, i) => {
+                      const netQty = item.netQty;
+                      return (
+                        <tr key={item.productId} className="border-b border-border hover:bg-secondary/30">
+                          <td className="p-2 sm:p-3">{i + 1}</td>
+                          <td className="p-2 sm:p-3 text-muted-foreground">-</td>
+                          <td className="p-2 sm:p-3">صافي</td>
+                          <td className="p-2 sm:p-3 font-medium">{item.productName}</td>
+                          <td className="p-2 sm:p-3 font-bold">{getFormattedNetQty(item.productId, netQty)}</td>
+                          <td className="p-2 sm:p-3 text-muted-foreground">-</td>
+                          <td className="p-2 sm:p-3 text-muted-foreground">{getWarehouseName(selectedWarehouse)}</td>
+                          <td className="p-2 sm:p-3">-</td>
+                          <td className="p-2 sm:p-3">-</td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    filteredExpanded.map((m, i) => (
+                      <tr key={m.itemId} className="border-b border-border hover:bg-secondary/30">
+                        <td className="p-2 sm:p-3">{i + 1}</td>
+                        <td className="p-2 sm:p-3 text-muted-foreground">{m.date}</td>
+                        <td className="p-2 sm:p-3">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                            m.type === 'in' ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
+                          }`}>{m.type === 'in' ? 'وارد' : 'صادر'}</span>
+                        </td>
+                        <td className="p-2 sm:p-3 font-medium">{m.productName}</td>
+                        <td className="p-2 sm:p-3 font-bold">{getMovementDisplayQty(m)}</td>
+                        <td className="p-2 sm:p-3 text-muted-foreground">{getMovementDisplayUnit(m)}</td>
+                        <td className="p-2 sm:p-3 text-muted-foreground">{getWarehouseName(m.warehouse_id)}</td>
+                        <td className="p-2 sm:p-3 text-muted-foreground">{m.entity_type === 'supplier' ? getSupplierName(m.entity_id) : '-'}</td>
+                        <td className="p-2 sm:p-3 text-muted-foreground">{m.entity_type === 'client' ? getClientName(m.entity_id) : '-'}</td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
