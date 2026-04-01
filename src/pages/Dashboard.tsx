@@ -120,9 +120,10 @@ const Dashboard = () => {
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {criticalStock.slice(0, 5).map(p => (
-                  <span key={p.id} className={`text-[10px] px-2 py-0.5 rounded-full ${getStockAlertColor(p)}`}>
-                    {p.name}: {p.quantity} {p.unit || 'قطعة'} (الحد: {getMinQuantity(p)})
-                    {p.warehouse_id && ` - ${getWarehouseName(p.warehouse_id)}`}
+                   <span key={p.id} className={`text-[10px] px-2 py-0.5 rounded-full ${getStockAlertColor(p)}`}>
+                     {p.name}: {getActualQty(p)} {p.unit || 'قطعة'} (الحد: {getMinQuantity(p)})
+                     {p.warehouse_id && ` - ${getWarehouseName(p.warehouse_id)}`}
+                   </span>
                   </span>
                 ))}
                 {criticalStock.length > 5 && (
