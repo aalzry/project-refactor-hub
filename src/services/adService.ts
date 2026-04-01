@@ -19,7 +19,7 @@ export class AdService {
   static async initialize() {
     if (!Capacitor.isNativePlatform()) return;
     
-    await AdMob.initialize({
+    await (AdMob as any).initialize({
       requestTrackingAuthorization: true,
       initializeForTesting: IS_TESTING,
     });
