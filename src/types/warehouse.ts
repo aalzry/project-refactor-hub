@@ -66,11 +66,11 @@ export type MovementType = 'in' | 'out';
 export interface MovementItem {
   product_id: string;
   quantity: number | null;
-  unit: string;                     // اسم الوحدة (للخلفية)
+  unit?: string;
   notes?: string;
-  unit_id?: string;                 // معرف الوحدة الأساسية (للمخزون)
-  display_quantity?: number | null; // الكمية الأصلية المدخلة من المستخدم
-  display_unit_id?: string | null;  // معرف الوحدة الأصلية المدخلة من المستخدم
+  unit_id?: string;
+  display_quantity?: number | null;
+  display_unit_id?: string | null;
 }
 
 export interface StockMovement {
