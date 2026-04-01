@@ -148,7 +148,7 @@ const AppLayout = ({ children }: { children: ReactNode }) => {
           </div>
         </header>
 
-        <div className="flex-1 p-4 sm:p-6 lg:p-8 animate-in fade-in duration-500 overflow-x-hidden">
+        <div className="flex-1 p-4 sm:p-6 lg:p-8 animate-in fade-in duration-500 overflow-x-hidden pb-16">
           {children}
         </div>
       </main>
