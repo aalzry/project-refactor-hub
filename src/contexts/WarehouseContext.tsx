@@ -1,16 +1,27 @@
 // ============================================================================
-// ملف: context/WarehouseContext.tsx (محدث - دعم الإشعارات بالوحدة المدخلة)
+// ملف: context/WarehouseContext.tsx (محدث - دعم العمل بدون إنترنت مع المزامنة)
 // ============================================================================
 
-import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import {
   getMovementNotification,
   getMultiMovementNotification,
   getLowStockNotification,
 } from '@/utils/notificationTemplates';
+import {
+  addToQueue,
+  getQueue,
+  removeFromQueue,
+  clearQueue,
+  generateTempId,
+  isTempId,
+  getQueueCount,
+  type OfflineOperation,
+} from '@/services/offlineQueue';
 
 // ========== تعريف الأنواع ==========
 export type MovementType = 'in' | 'out';
@@ -42,6 +53,7 @@ export interface StockMovement {
   unit_id?: string | null;
   display_quantity?: number | null;
   display_unit_id?: string | null;
+  _offline?: boolean; // علامة محلية
 }
 
 export interface Product {
@@ -61,6 +73,7 @@ export interface Product {
   display_unit_id?: string | null;
   created_at: string;
   created_by?: string | null;
+  _offline?: boolean;
 }
 
 export interface Category {
@@ -69,6 +82,7 @@ export interface Category {
   description?: string;
   created_at: string;
   created_by?: string | null;
+  _offline?: boolean;
 }
 
 export interface Warehouse {
@@ -80,6 +94,7 @@ export interface Warehouse {
   notes?: string;
   created_at: string;
   created_by?: string | null;
+  _offline?: boolean;
 }
 
 export interface Supplier {
@@ -91,6 +106,7 @@ export interface Supplier {
   notes?: string;
   created_at: string;
   created_by?: string | null;
+  _offline?: boolean;
 }
 
 export interface Client {
@@ -101,6 +117,7 @@ export interface Client {
   notes?: string;
   created_at: string;
   created_by?: string | null;
+  _offline?: boolean;
 }
 
 export interface Unit {
@@ -127,6 +144,9 @@ interface WarehouseContextType {
   loading: boolean;
   units: Unit[];
   unitConversions: UnitConversion[];
+  pendingCount: number;
+  syncing: boolean;
+  syncOfflineData: () => Promise<void>;
   addProduct: (p: Omit<Product, 'id' | 'created_at' | 'created_by'>) => Promise<void>;
   updateProduct: (p: Product) => Promise<void>;
   deleteProduct: (id: string) => Promise<boolean>;
@@ -170,8 +190,17 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
   const [units, setUnits] = useState<Unit[]>([]);
   const [unitConversions, setUnitConversions] = useState<UnitConversion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pendingCount, setPendingCount] = useState(getQueueCount());
+  const [syncing, setSyncing] = useState(false);
   const { user, displayName } = useAuth();
   const { toast } = useToast();
+  const isOnline = useOnlineStatus();
+  const syncingRef = useRef(false);
+
+  // تحديث عدد العمليات المعلقة
+  const updatePendingCount = useCallback(() => {
+    setPendingCount(getQueueCount());
+  }, []);
 
   // ========== جلب جميع البيانات ==========
   const fetchAll = useCallback(async () => {
@@ -258,12 +287,236 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
 
   const showError = (msg: string) => toast({ title: 'خطأ', description: msg, variant: 'destructive' });
 
+  // ========== مزامنة البيانات غير المتصلة ==========
+  const syncOfflineData = useCallback(async () => {
+    if (syncingRef.current || !user?.id) return;
+    const queue = getQueue();
+    if (queue.length === 0) return;
+
+    syncingRef.current = true;
+    setSyncing(true);
+
+    let successCount = 0;
+    const tempIdMap: Record<string, string> = {}; // خريطة IDs المؤقتة -> الحقيقية
+
+    for (const op of queue) {
+      try {
+        let success = false;
+
+        switch (op.type) {
+          case 'addProduct': {
+            const { _offline, ...productData } = op.data;
+            const tempId = productData.id;
+            delete productData.id;
+            const { data, error } = await supabase
+              .from('products')
+              .insert({ ...productData, created_by: user.id })
+              .select()
+              .single();
+            if (!error && data) {
+              tempIdMap[tempId] = data.id;
+              setProducts(prev => prev.map(p => p.id === tempId ? { ...data, _offline: undefined } as unknown as Product : p));
+              success = true;
+            }
+            break;
+          }
+          case 'addCategory': {
+            const { _offline, ...catData } = op.data;
+            const tempId = catData.id;
+            delete catData.id;
+            const { data, error } = await supabase
+              .from('categories')
+              .insert({ ...catData, created_by: user.id })
+              .select()
+              .single();
+            if (!error && data) {
+              tempIdMap[tempId] = data.id;
+              setCategories(prev => prev.map(c => c.id === tempId ? { ...data, _offline: undefined } as Category : c));
+              success = true;
+            }
+            break;
+          }
+          case 'addWarehouse': {
+            const { _offline, ...whData } = op.data;
+            const tempId = whData.id;
+            delete whData.id;
+            const { data, error } = await supabase
+              .from('warehouses')
+              .insert({ ...whData, created_by: user.id })
+              .select()
+              .single();
+            if (!error && data) {
+              tempIdMap[tempId] = data.id;
+              setWarehouses(prev => prev.map(w => w.id === tempId ? { ...data, _offline: undefined } as Warehouse : w));
+              success = true;
+            }
+            break;
+          }
+          case 'addSupplier': {
+            const { _offline, ...supData } = op.data;
+            const tempId = supData.id;
+            delete supData.id;
+            const { data, error } = await supabase
+              .from('suppliers')
+              .insert({ ...supData, created_by: user.id })
+              .select()
+              .single();
+            if (!error && data) {
+              tempIdMap[tempId] = data.id;
+              setSuppliers(prev => prev.map(s => s.id === tempId ? { ...data, _offline: undefined } as Supplier : s));
+              success = true;
+            }
+            break;
+          }
+          case 'addClient': {
+            const { _offline, ...clData } = op.data;
+            const tempId = clData.id;
+            delete clData.id;
+            const { data, error } = await supabase
+              .from('clients')
+              .insert({ ...clData, created_by: user.id })
+              .select()
+              .single();
+            if (!error && data) {
+              tempIdMap[tempId] = data.id;
+              setClients(prev => prev.map(c => c.id === tempId ? { ...data, _offline: undefined } as Client : c));
+              success = true;
+            }
+            break;
+          }
+          case 'addMovement': {
+            const movData = { ...op.data };
+            delete movData._offline;
+            const tempId = movData.id;
+            delete movData.id;
+            delete movData.created_at;
+            
+            // استبدال IDs المؤقتة بالحقيقية
+            if (movData.warehouse_id && tempIdMap[movData.warehouse_id]) {
+              movData.warehouse_id = tempIdMap[movData.warehouse_id];
+            }
+            if (movData.entity_id && tempIdMap[movData.entity_id]) {
+              movData.entity_id = tempIdMap[movData.entity_id];
+            }
+            if (movData.product_id && tempIdMap[movData.product_id]) {
+              movData.product_id = tempIdMap[movData.product_id];
+            }
+
+            const insertData: any = {
+              warehouse_id: movData.warehouse_id,
+              type: movData.type,
+              entity_id: movData.entity_id,
+              entity_type: movData.entity_type,
+              date: movData.date,
+              notes: movData.notes,
+              created_by: user.id,
+              display_quantity: movData.display_quantity ?? null,
+              display_unit: movData.display_unit_id ?? null,
+            };
+
+            if (movData.product_id && movData.quantity !== undefined) {
+              insertData.product_id = movData.product_id;
+              insertData.quantity = movData.quantity;
+              insertData.unit = movData.unit || 'قطعة';
+              insertData.unit_id = movData.unit_id;
+              insertData.items = null;
+            } else if (movData.items && movData.items.length > 0) {
+              const itemsToStore = movData.items.map((item: any) => {
+                const pid = tempIdMap[item.product_id] || item.product_id;
+                return {
+                  product_id: pid,
+                  quantity: item.quantity,
+                  unit: item.unit || 'قطعة',
+                  notes: item.notes,
+                  unit_id: item.unit_id,
+                  display_quantity: item.display_quantity,
+                  display_unit_id: item.display_unit_id,
+                };
+              });
+              insertData.items = JSON.stringify(itemsToStore);
+              insertData.product_id = null;
+              insertData.quantity = null;
+              insertData.unit = null;
+              insertData.unit_id = null;
+            }
+
+            const { data, error } = await supabase
+              .from('stock_movements')
+              .insert(insertData)
+              .select()
+              .single();
+
+            if (!error && data) {
+              tempIdMap[tempId] = data.id;
+              setMovements(prev => prev.map(m => m.id === tempId ? { ...data as any, _offline: undefined } as StockMovement : m));
+              success = true;
+            }
+            break;
+          }
+          default:
+            success = true;
+            break;
+        }
+
+        if (success) {
+          removeFromQueue(op.id);
+          successCount++;
+        }
+      } catch (e) {
+        console.error('خطأ في مزامنة العملية:', op.type, e);
+      }
+    }
+
+    syncingRef.current = false;
+    setSyncing(false);
+    updatePendingCount();
+
+    if (successCount > 0) {
+      toast({
+        title: 'تمت المزامنة',
+        description: `تم ترحيل ${successCount} عملية بنجاح`,
+      });
+      // إعادة تحميل البيانات من السيرفر
+      await fetchAll();
+    }
+  }, [user, toast, fetchAll, updatePendingCount]);
+
+  // مزامنة تلقائية عند عودة الاتصال
+  useEffect(() => {
+    if (isOnline && user) {
+      const timer = setTimeout(() => {
+        syncOfflineData();
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [isOnline, user, syncOfflineData]);
+
   // ========== دوال المنتجات ==========
   const addProduct = useCallback(async (p: Omit<Product, 'id' | 'created_at' | 'created_by'>) => {
     if (!user?.id) {
       showError('يجب تسجيل الدخول أولاً');
       return;
     }
+
+    if (!navigator.onLine) {
+      const tempId = generateTempId();
+      const offlineProduct: Product = {
+        ...p,
+        id: tempId,
+        created_at: new Date().toISOString(),
+        created_by: user.id,
+        unit: p.unit || 'قطعة',
+        min_quantity: p.min_quantity ?? 2,
+        pack_size: p.pack_size ?? 1,
+        _offline: true,
+      };
+      setProducts(prev => [...prev, offlineProduct]);
+      addToQueue({ type: 'addProduct', data: offlineProduct });
+      updatePendingCount();
+      toast({ title: 'تم الحفظ محلياً', description: 'سيتم ترحيل البيانات عند عودة الإنترنت' });
+      return;
+    }
+
     const { data, error } = await supabase
       .from('products')
       .insert({
@@ -285,7 +538,7 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
     if (data) {
       setProducts(prev => [...prev, data as unknown as Product]);
     }
-  }, [user]);
+  }, [user, updatePendingCount]);
 
   const updateProduct = useCallback(async (p: Product) => {
     const { error } = await supabase
@@ -323,6 +576,23 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
   // ========== دوال التصنيفات ==========
   const addCategory = useCallback(async (c: Omit<Category, 'id' | 'created_at' | 'created_by'>) => {
     if (!user?.id) return;
+
+    if (!navigator.onLine) {
+      const tempId = generateTempId();
+      const offlineCat: Category = {
+        ...c,
+        id: tempId,
+        created_at: new Date().toISOString(),
+        created_by: user.id,
+        _offline: true,
+      };
+      setCategories(prev => [...prev, offlineCat]);
+      addToQueue({ type: 'addCategory', data: offlineCat });
+      updatePendingCount();
+      toast({ title: 'تم الحفظ محلياً', description: 'سيتم ترحيل البيانات عند عودة الإنترنت' });
+      return;
+    }
+
     const { data, error } = await supabase
       .from('categories')
       .insert({ ...c, created_by: user.id })
@@ -330,7 +600,7 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
       .single();
     if (error) showError(error.message);
     else if (data) setCategories(prev => [...prev, data as Category]);
-  }, [user]);
+  }, [user, updatePendingCount]);
 
   const updateCategory = useCallback(async (c: Category) => {
     const { error } = await supabase
@@ -352,6 +622,23 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
   // ========== دوال المخازن ==========
   const addWarehouse = useCallback(async (w: Omit<Warehouse, 'id' | 'created_at' | 'created_by'>) => {
     if (!user?.id) return;
+
+    if (!navigator.onLine) {
+      const tempId = generateTempId();
+      const offlineWh: Warehouse = {
+        ...w,
+        id: tempId,
+        created_at: new Date().toISOString(),
+        created_by: user.id,
+        _offline: true,
+      };
+      setWarehouses(prev => [...prev, offlineWh]);
+      addToQueue({ type: 'addWarehouse', data: offlineWh });
+      updatePendingCount();
+      toast({ title: 'تم الحفظ محلياً', description: 'سيتم ترحيل البيانات عند عودة الإنترنت' });
+      return;
+    }
+
     const { data, error } = await supabase
       .from('warehouses')
       .insert({ ...w, created_by: user.id })
@@ -359,7 +646,7 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
       .single();
     if (error) showError(error.message);
     else if (data) setWarehouses(prev => [...prev, data as Warehouse]);
-  }, [user]);
+  }, [user, updatePendingCount]);
 
   const updateWarehouse = useCallback(async (w: Warehouse) => {
     const { error } = await supabase
@@ -381,6 +668,23 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
   // ========== دوال الموردين ==========
   const addSupplier = useCallback(async (s: Omit<Supplier, 'id' | 'created_at' | 'created_by'>) => {
     if (!user?.id) return;
+
+    if (!navigator.onLine) {
+      const tempId = generateTempId();
+      const offlineSup: Supplier = {
+        ...s,
+        id: tempId,
+        created_at: new Date().toISOString(),
+        created_by: user.id,
+        _offline: true,
+      };
+      setSuppliers(prev => [...prev, offlineSup]);
+      addToQueue({ type: 'addSupplier', data: offlineSup });
+      updatePendingCount();
+      toast({ title: 'تم الحفظ محلياً', description: 'سيتم ترحيل البيانات عند عودة الإنترنت' });
+      return;
+    }
+
     const { data, error } = await supabase
       .from('suppliers')
       .insert({ ...s, created_by: user.id })
@@ -388,7 +692,7 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
       .single();
     if (error) showError(error.message);
     else if (data) setSuppliers(prev => [...prev, data as Supplier]);
-  }, [user]);
+  }, [user, updatePendingCount]);
 
   const updateSupplier = useCallback(async (s: Supplier) => {
     const { error } = await supabase
@@ -410,6 +714,23 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
   // ========== دوال العملاء ==========
   const addClient = useCallback(async (c: Omit<Client, 'id' | 'created_at' | 'created_by'>) => {
     if (!user?.id) return;
+
+    if (!navigator.onLine) {
+      const tempId = generateTempId();
+      const offlineClient: Client = {
+        ...c,
+        id: tempId,
+        created_at: new Date().toISOString(),
+        created_by: user.id,
+        _offline: true,
+      };
+      setClients(prev => [...prev, offlineClient]);
+      addToQueue({ type: 'addClient', data: offlineClient });
+      updatePendingCount();
+      toast({ title: 'تم الحفظ محلياً', description: 'سيتم ترحيل البيانات عند عودة الإنترنت' });
+      return;
+    }
+
     const { data, error } = await supabase
       .from('clients')
       .insert({ ...c, created_by: user.id })
@@ -417,7 +738,7 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
       .single();
     if (error) showError(error.message);
     else if (data) setClients(prev => [...prev, data as Client]);
-  }, [user]);
+  }, [user, updatePendingCount]);
 
   const updateClient = useCallback(async (c: Client) => {
     const { error } = await supabase
@@ -443,6 +764,12 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
       if (product) {
         const change = movement.type === 'in' ? movement.quantity : -movement.quantity;
         const newQty = reverse ? product.quantity - change : product.quantity + change;
+
+        if (!navigator.onLine) {
+          setProducts(prev => prev.map(p => p.id === movement.product_id ? { ...p, quantity: newQty } : p));
+          return;
+        }
+
         const { error } = await supabase
           .from('products')
           .update({ quantity: newQty })
@@ -459,6 +786,12 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
         if (product) {
           const change = movement.type === 'in' ? item.quantity : -item.quantity;
           const newQty = reverse ? product.quantity - change : product.quantity + change;
+
+          if (!navigator.onLine) {
+            setProducts(prev => prev.map(p => p.id === item.product_id ? { ...p, quantity: newQty } : p));
+            continue;
+          }
+
           const { error } = await supabase
             .from('products')
             .update({ quantity: newQty })
@@ -476,6 +809,23 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
   const addMovement = useCallback(async (m: Omit<StockMovement, 'id' | 'created_at' | 'created_by'>) => {
     if (!user?.id) {
       showError('يجب تسجيل الدخول أولاً');
+      return;
+    }
+
+    if (!navigator.onLine) {
+      const tempId = generateTempId();
+      const offlineMovement: StockMovement = {
+        ...m,
+        id: tempId,
+        created_at: new Date().toISOString(),
+        created_by: user.id,
+        _offline: true,
+      };
+      setMovements(prev => [...prev, offlineMovement]);
+      await updateProductQuantities(offlineMovement, false);
+      addToQueue({ type: 'addMovement', data: offlineMovement });
+      updatePendingCount();
+      toast({ title: 'تم الحفظ محلياً', description: 'سيتم ترحيل الحركة عند عودة الإنترنت' });
       return;
     }
 
@@ -552,11 +902,9 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
         if (newMovement.product_id && newMovement.quantity !== undefined) {
           const productName = products.find(p => p.id === newMovement.product_id)?.name || 'منتج';
           
-          // ✅ استخدم الكمية والوحدة المدخلة من المستخدم (display)
           const displayQty = newMovement.display_quantity ?? newMovement.quantity;
           const displayUnitId = newMovement.display_unit_id ?? newMovement.unit_id;
           
-          // ✅ احصل على اسم الوحدة المعروضة
           let displayUnitName = 'قطعة';
           if (displayUnitId) {
             const foundUnit = units.find(u => u.id === displayUnitId);
@@ -582,7 +930,6 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
             created_by: user.id,
           });
 
-          // إشعار المخزون المنخفض
           const updatedProduct = products.find(p => p.id === newMovement.product_id);
           if (updatedProduct) {
             const newQty = newMovement.type === 'out'
@@ -622,7 +969,6 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
         }
       } catch (e) {
         console.error('Error creating notification:', e);
-        // لا نعرض خطأ للمستخدم
       }
     }
   }, [user, updateProductQuantities, warehouses, suppliers, clients, products, displayName, units]);
@@ -765,6 +1111,7 @@ export const WarehouseProvider = ({ children }: { children: ReactNode }) => {
     <WarehouseContext.Provider value={{
       products, categories, warehouses, suppliers, clients, movements, loading,
       units, unitConversions,
+      pendingCount, syncing, syncOfflineData,
       addProduct, updateProduct, deleteProduct,
       addCategory, updateCategory, deleteCategory,
       addWarehouse, updateWarehouse, deleteWarehouse,
