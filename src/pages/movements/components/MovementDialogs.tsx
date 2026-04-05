@@ -375,12 +375,12 @@ export const MovementDialogs: React.FC<MovementDialogsProps> = ({
           const minQty = getProductMinQty(form.product_id);
           const newStock = currentStock - baseQuantity;
           if (newStock < minQty && minQty > 0) {
-            toast({
-              title: '⚠️ تحذير: مخزون أقل من الحد الأدنى',
-              description: `بعد هذه العملية، سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}).`,
-              variant: 'destructive'
-            });
-            // لا نمنع العملية، فقط نحذر
+            setTimeout(() => {
+              toast({
+                title: '⚠️ تنبيه: مخزون منخفض',
+                description: `بعد هذه العملية، سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}).`,
+              });
+            }, 500);
           }
         }
 
