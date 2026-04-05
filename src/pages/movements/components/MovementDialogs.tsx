@@ -375,12 +375,12 @@ export const MovementDialogs: React.FC<MovementDialogsProps> = ({
           const minQty = getProductMinQty(form.product_id);
           const newStock = currentStock - baseQuantity;
           if (newStock < minQty && minQty > 0) {
-            toast({
-              title: '⚠️ تحذير: مخزون أقل من الحد الأدنى',
-              description: `بعد هذه العملية، سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}).`,
-              variant: 'destructive'
-            });
-            // لا نمنع العملية، فقط نحذر
+            setTimeout(() => {
+              toast({
+                title: '⚠️ تنبيه: مخزون منخفض',
+                description: `بعد هذه العملية، سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}).`,
+              });
+            }, 500);
           }
         }
 
@@ -457,11 +457,12 @@ export const MovementDialogs: React.FC<MovementDialogsProps> = ({
             const minQty = getProductMinQty(item.product_id);
             const newStock = currentStock - item.quantity;
             if (newStock < minQty && minQty > 0) {
-              toast({
-                title: '⚠️ تحذير: مخزون أقل من الحد الأدنى',
-                description: `المنتج ${getProductName(item.product_id)}: بعد الصرف سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}).`,
-                variant: 'destructive'
-              });
+              setTimeout(() => {
+                toast({
+                  title: '⚠️ تنبيه: مخزون منخفض',
+                  description: `المنتج ${getProductName(item.product_id)}: بعد الصرف سيصبح المخزون (${newStock}) وهو أقل من الحد الأدنى المحدد (${minQty}).`,
+                });
+              }, 500);
             }
           }
         }
